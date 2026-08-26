@@ -7,15 +7,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const db = getDb();
   const payload = (await request.json()) as { action?: "confirm" };
 
-  const existing = db.select().from(receipts).where(eq(receipts.id, Number(id))).get();
+  const [existing] = await db.select().from(receipts).where(eq(receipts.id, Number(id)));
   if (!existing) return Response.json({ error: "Recepção não encontrada" }, { status: 404 });
 
   if (payload.action === "confirm") {
-    const [updated] = db
+    const [updated] = await db
       .update(receipts)
       .set({ progress: 100, status: "Confirmada" })
       .where(eq(receipts.id, Number(id)))
-      .returning().all();
+      .returning();
     return Response.json({ receipt: updated });
   }
 

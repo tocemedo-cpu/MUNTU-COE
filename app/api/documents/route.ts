@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
 
   const rows = q
-    ? db
+    ? await db
         .select()
         .from(documents)
         .where(
@@ -19,8 +19,7 @@ export async function GET(request: Request) {
             like(documents.owner, `%${q}%`)
           )
         )
-        .all()
-    : db.select().from(documents).all();
+    : await db.select().from(documents);
 
   return Response.json({ documents: rows });
 }
@@ -38,7 +37,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "O nome do documento é obrigatório" }, { status: 400 });
   }
 
-  const [created] = db
+  const [created] = await db
     .insert(documents)
     .values({
       name: payload.name.trim(),
@@ -48,7 +47,7 @@ export async function POST(request: Request) {
       version: "v1",
       updated: "Agora",
     })
-    .returning().all();
+    .returning();
 
   return Response.json({ document: created }, { status: 201 });
 }

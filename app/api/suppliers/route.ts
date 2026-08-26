@@ -8,8 +8,8 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
 
   const rows = q
-    ? db.select().from(suppliers).where(like(suppliers.name, `%${q}%`)).all()
-    : db.select().from(suppliers).all();
+    ? await db.select().from(suppliers).where(like(suppliers.name, `%${q}%`))
+    : await db.select().from(suppliers);
 
   return Response.json({ suppliers: rows });
 }
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "O nome do fornecedor é obrigatório" }, { status: 400 });
   }
 
-  const [created] = db
+  const [created] = await db
     .insert(suppliers)
     .values({
       name: payload.name.trim(),
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       local: "0%",
       status: "Documentos",
     })
-    .returning().all();
+    .returning();
 
   return Response.json({ supplier: created }, { status: 201 });
 }

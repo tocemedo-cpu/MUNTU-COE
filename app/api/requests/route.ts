@@ -1,4 +1,4 @@
-import { eq, like, or, desc } from "drizzle-orm";
+import { like, or, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests } from "@/db/schema";
 
@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
 
   const rows = q
-    ? db
+    ? await db
         .select()
         .from(requests)
         .where(
@@ -20,8 +20,7 @@ export async function GET(request: Request) {
           )
         )
         .orderBy(desc(requests.createdAt))
-        .all()
-    : db.select().from(requests).orderBy(desc(requests.createdAt)).all();
+    : await db.select().from(requests).orderBy(desc(requests.createdAt));
 
   return Response.json({ requests: rows });
 }
@@ -39,12 +38,12 @@ export async function POST(request: Request) {
     owner?: string;
   };
 
-  const count = db.select().from(requests).all().length;
-  const id = `REQ-2026-${String(815 + count).padStart(4, "0")}`;
+  const total = (await db.select().from(requests)).length;
+  const id = `REQ-2026-${String(815 + total).padStart(4, "0")}`;
 
   const sla = payload.priority === "Alta" ? "4 horas" : payload.priority === "Média" ? "8 horas" : "16 horas";
 
-  const [created] = db
+  const [created] = await db
     .insert(requests)
     .values({
       id,
@@ -60,7 +59,7 @@ export async function POST(request: Request) {
       supplier: payload.supplier ?? "",
       costCenter: payload.costCenter ?? "",
     })
-    .returning().all();
+    .returning();
 
   return Response.json({ request: created }, { status: 201 });
 }

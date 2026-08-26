@@ -5,7 +5,7 @@ const stages = ["Intake", "Validação", "Aprovação", "PO", "Receção", "Fact
 
 export async function GET() {
   const db = getDb();
-  const all = db.select().from(requests).all();
+  const all = await db.select().from(requests);
 
   const active = all.filter((item) => !["Pago", "Rejeitado"].includes(item.status)).length;
   const totalValue = all.reduce((sum, item) => sum + item.value, 0);

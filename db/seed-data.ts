@@ -1,7 +1,7 @@
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
 
-type Db = BetterSQLite3Database<typeof schema>;
+type Db = PostgresJsDatabase<typeof schema>;
 
 const demoUsers = [
   { name: "Ana Manuel", email: "ana.manuel@operadora.ao", password: "Muntu2026!", role: "Cliente comprador", initials: "AM" },
@@ -65,21 +65,21 @@ const demoDocuments = [
   { name: "Parecer_Fiscal_AOA.pdf", type: "Compliance", request: "POL-2026-04", owner: "Muntu Legal", version: "v5", updated: "22 Ago" },
 ];
 
-export function seedIfEmpty(db: Db) {
-  const userCount = db.select().from(schema.users).all().length;
-  if (userCount === 0) {
-    db.insert(schema.users).values(demoUsers).run();
+export async function seedIfEmpty(db: Db) {
+  const existingUsers = await db.select().from(schema.users).limit(1);
+  if (existingUsers.length === 0) {
+    await db.insert(schema.users).values(demoUsers).onConflictDoNothing();
   }
 
-  const requestCount = db.select().from(schema.requests).all().length;
-  if (requestCount === 0) {
-    db.insert(schema.requests).values(demoRequests).run();
-    db.insert(schema.suppliers).values(demoSuppliers).run();
-    db.insert(schema.purchaseOrders).values(demoPurchaseOrders).run();
-    db.insert(schema.receipts).values(demoReceipts).run();
-    db.insert(schema.invoices).values(demoInvoices).run();
-    db.insert(schema.exceptions).values(demoExceptions).run();
-    db.insert(schema.paymentBatches).values(demoPaymentBatches).run();
-    db.insert(schema.documents).values(demoDocuments).run();
+  const existingRequests = await db.select().from(schema.requests).limit(1);
+  if (existingRequests.length === 0) {
+    await db.insert(schema.requests).values(demoRequests).onConflictDoNothing();
+    await db.insert(schema.suppliers).values(demoSuppliers).onConflictDoNothing();
+    await db.insert(schema.purchaseOrders).values(demoPurchaseOrders).onConflictDoNothing();
+    await db.insert(schema.receipts).values(demoReceipts);
+    await db.insert(schema.invoices).values(demoInvoices).onConflictDoNothing();
+    await db.insert(schema.exceptions).values(demoExceptions).onConflictDoNothing();
+    await db.insert(schema.paymentBatches).values(demoPaymentBatches).onConflictDoNothing();
+    await db.insert(schema.documents).values(demoDocuments);
   }
 }

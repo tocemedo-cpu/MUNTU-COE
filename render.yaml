@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: muntu-coe-portal
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.1
+      - key: DATABASE_URL
+        sync: false

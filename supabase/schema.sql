@@ -1,0 +1,224 @@
+-- =========================================================
+-- Muntu COE — Schema Supabase (Postgres)
+-- Cole este ficheiro completo no SQL Editor do Supabase e execute.
+-- =========================================================
+
+-- -----------------------------------------------------------------
+-- Tabelas
+-- -----------------------------------------------------------------
+
+create table if not exists public.users (
+  id bigint generated always as identity primary key,
+  name text not null,
+  email text not null unique,
+  password text not null,
+  role text not null,
+  initials text not null,
+  tenant text not null default 'Operadora Atlântico, SA'
+);
+
+create table if not exists public.requests (
+  id text primary key,
+  subject text not null,
+  tower text not null,
+  value bigint not null default 0,
+  status text not null,
+  priority text not null,
+  owner text not null,
+  sla text not null,
+  stage integer not null default 0,
+  submitted text not null,
+  supplier text not null,
+  cost_center text not null,
+  notes text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.suppliers (
+  id bigint generated always as identity primary key,
+  name text not null unique,
+  category text not null,
+  passport integer not null default 0,
+  risk text not null default 'Médio',
+  local text not null default '0%',
+  status text not null default 'Documentos',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.purchase_orders (
+  id text primary key,
+  supplier text not null,
+  description text not null,
+  value bigint not null default 0,
+  status text not null,
+  next_action text not null default ''
+);
+
+create table if not exists public.receipts (
+  id bigint generated always as identity primary key,
+  po text not null,
+  description text not null,
+  supplier text not null,
+  value bigint not null default 0,
+  progress integer not null default 0,
+  status text not null default 'Em curso'
+);
+
+create table if not exists public.invoices (
+  id text primary key,
+  supplier text not null,
+  po text not null,
+  value bigint not null default 0,
+  match text not null,
+  status text not null,
+  due text not null
+);
+
+create table if not exists public.exceptions (
+  id text primary key,
+  title text not null,
+  ref text not null,
+  owner text not null,
+  age text not null,
+  impact text not null,
+  resolved boolean not null default false
+);
+
+create table if not exists public.payment_batches (
+  id text primary key,
+  date text not null,
+  count integer not null default 0,
+  value bigint not null default 0,
+  status text not null default 'Pronto',
+  released boolean not null default false
+);
+
+create table if not exists public.documents (
+  id bigint generated always as identity primary key,
+  name text not null,
+  type text not null,
+  request text not null,
+  owner text not null,
+  version text not null default 'v1',
+  updated text not null
+);
+
+-- -----------------------------------------------------------------
+-- Índices úteis para pesquisa/filtros
+-- -----------------------------------------------------------------
+
+create index if not exists idx_requests_status on public.requests (status);
+create index if not exists idx_requests_supplier on public.requests (supplier);
+create index if not exists idx_invoices_status on public.invoices (status);
+create index if not exists idx_exceptions_resolved on public.exceptions (resolved);
+create index if not exists idx_payment_batches_released on public.payment_batches (released);
+
+-- -----------------------------------------------------------------
+-- Row Level Security
+-- Estas políticas são permissivas (leitura/escrita públicas) para
+-- corresponder ao comportamento actual do backend de demonstração.
+-- Antes de ir para produção, restrinja `using`/`with check` a
+-- `auth.uid()` ou a um papel de serviço, e nunca exponha a coluna
+-- `password` de `users` através da API pública (use Supabase Auth).
+-- -----------------------------------------------------------------
+
+alter table public.users enable row level security;
+alter table public.requests enable row level security;
+alter table public.suppliers enable row level security;
+alter table public.purchase_orders enable row level security;
+alter table public.receipts enable row level security;
+alter table public.invoices enable row level security;
+alter table public.exceptions enable row level security;
+alter table public.payment_batches enable row level security;
+alter table public.documents enable row level security;
+
+create policy "public read requests" on public.requests for select using (true);
+create policy "public write requests" on public.requests for insert with check (true);
+create policy "public update requests" on public.requests for update using (true);
+
+create policy "public read suppliers" on public.suppliers for select using (true);
+create policy "public write suppliers" on public.suppliers for insert with check (true);
+
+create policy "public read purchase_orders" on public.purchase_orders for select using (true);
+
+create policy "public read receipts" on public.receipts for select using (true);
+create policy "public update receipts" on public.receipts for update using (true);
+
+create policy "public read invoices" on public.invoices for select using (true);
+
+create policy "public read exceptions" on public.exceptions for select using (true);
+create policy "public update exceptions" on public.exceptions for update using (true);
+
+create policy "public read payment_batches" on public.payment_batches for select using (true);
+create policy "public update payment_batches" on public.payment_batches for update using (true);
+
+create policy "public read documents" on public.documents for select using (true);
+create policy "public write documents" on public.documents for insert with check (true);
+
+-- Sem política de select em `users`: mantém a tabela ilegível pela
+-- API pública/anon key. O login deve chamar esta tabela apenas a
+-- partir de uma rota de servidor com a service role key.
+
+-- -----------------------------------------------------------------
+-- Dados de demonstração
+-- -----------------------------------------------------------------
+
+insert into public.users (name, email, password, role, initials, tenant) values
+  ('Ana Manuel', 'ana.manuel@operadora.ao', 'Muntu2026!', 'Cliente comprador', 'AM', 'Operadora Atlântico, SA'),
+  ('João Sebastião', 'joao.sebastiao@operadora.ao', 'Muntu2026!', 'Aprovador', 'JS', 'Operadora Atlântico, SA'),
+  ('Marta Miguel', 'marta.miguel@muntucoe.ao', 'Muntu2026!', 'Operações Muntu', 'MM', 'Operadora Atlântico, SA'),
+  ('Carlos Mateus', 'carlos.mateus@kwanzaindustrial.ao', 'Muntu2026!', 'Fornecedor', 'CM', 'Operadora Atlântico, SA')
+on conflict (email) do nothing;
+
+insert into public.requests (id, subject, tower, value, status, priority, owner, sla, stage, submitted, supplier, cost_center) values
+  ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210'),
+  ('REQ-2026-0813', 'Inspecção NDT offshore', 'Serviços técnicos', 31600000, 'Em execução', 'Alta', 'Marta Miguel', '18h 40m', 3, '25 Ago, 15:42', 'Atlântico Integrity', 'INT-B15-105'),
+  ('REQ-2026-0812', 'Calibração de PRV — campanha Q3', 'PO-to-Receipt', 12450000, 'Receção', 'Média', 'Domingos José', '1d 04h', 4, '24 Ago, 11:20', 'Luanda Calibration Services', 'MAI-PRV-330'),
+  ('REQ-2026-0809', 'Consumíveis de manutenção', 'Invoice-to-Pay', 5980000, 'Excepção', 'Média', 'Ana Manuel', 'Vencido 2h', 6, '22 Ago, 08:05', 'Mwangolé Supplies', 'MRO-BASE-090'),
+  ('REQ-2026-0804', 'Transporte de equipa para Soyo', 'Invoice-to-Pay', 3200000, 'Pago', 'Normal', 'Ana Manuel', 'Concluído', 7, '19 Ago, 13:37', 'Norte Logística', 'LOG-SOY-011')
+on conflict (id) do nothing;
+
+insert into public.suppliers (name, category, passport, risk, local, status) values
+  ('Kwanza Industrial', 'Válvulas e MRO', 96, 'Baixo', '92%', 'Activo'),
+  ('Atlântico Integrity', 'NDT e Integridade', 88, 'Baixo', '78%', 'Activo'),
+  ('Luanda Calibration Services', 'Calibração', 81, 'Médio', '100%', 'Revisão'),
+  ('Mwangolé Supplies', 'Consumíveis', 73, 'Médio', '85%', 'Documentos'),
+  ('Norte Logística', 'Transporte', 91, 'Baixo', '100%', 'Activo')
+on conflict (name) do nothing;
+
+insert into public.purchase_orders (id, supplier, description, value, status, next_action) values
+  ('PO-6100432', 'Kwanza Industrial', 'Válvulas de controlo', 84000000, 'Expediting', '02 Set'),
+  ('PO-6100424', 'Atlântico Integrity', 'Inspecção NDT offshore', 31600000, 'Confirmado', '30 Ago'),
+  ('PO-6100411', 'Mwangolé Supplies', 'Consumíveis MRO', 5980000, 'Excepção', 'Hoje'),
+  ('PO-6100380', 'Luanda Calibration Services', 'Calibração PRV', 12450000, 'Entregue', 'Receber')
+on conflict (id) do nothing;
+
+insert into public.receipts (po, description, supplier, value, progress, status) values
+  ('PO-6100380', 'Calibração PRV — campanha Q3', 'Luanda Calibration Services', 12450000, 100, 'A confirmar'),
+  ('PO-6100432', 'Válvulas de controlo — lote 1/2', 'Kwanza Industrial', 42000000, 50, '02 Set'),
+  ('PO-6100424', 'Inspecção NDT — mobilização', 'Atlântico Integrity', 9480000, 30, 'Em curso');
+
+insert into public.invoices (id, supplier, po, value, match, status, due) values
+  ('FT-2026-1198', 'Kwanza Industrial', 'PO-6100432', 42000000, '3-way match', 'Validada', '04 Set'),
+  ('FT-2026-1192', 'Mwangolé Supplies', 'PO-6100411', 5980000, 'Preço divergente', 'Excepção', 'Hoje'),
+  ('FT-2026-1186', 'Norte Logística', 'PO-6100398', 3200000, '3-way match', 'Pago', 'Concluído'),
+  ('FT-2026-1179', 'Luanda Calibration Services', 'PO-6100380', 12450000, 'Receção em falta', 'Pendente', '29 Ago')
+on conflict (id) do nothing;
+
+insert into public.exceptions (id, title, ref, owner, age, impact) values
+  ('EXC-0264', 'Preço da factura diverge do PO em 4,8%', 'FT-2026-1192 • PO-6100411', 'Comprador', '2h 14m', 'AOA 286 000'),
+  ('EXC-0261', 'Recepção de serviço não registada', 'FT-2026-1179 • PO-6100380', 'Requisitante', '7h 38m', 'AOA 12 450 000'),
+  ('EXC-0258', 'Certificado fiscal expirado', 'Supplier Passport • Mwangolé Supplies', 'Fornecedor', '1d 03h', 'Bloqueio de pagamento')
+on conflict (id) do nothing;
+
+insert into public.payment_batches (id, date, count, value, status, released) values
+  ('PAY-2026-035', '28 Ago 2026', 8, 68450000, 'Pronto', false),
+  ('PAY-2026-034', '25 Ago 2026', 11, 102980000, 'Pago', true),
+  ('PAY-2026-033', '21 Ago 2026', 6, 44200000, 'Pago', true)
+on conflict (id) do nothing;
+
+insert into public.documents (name, type, request, owner, version, updated) values
+  ('Contrato_MRO_2026.pdf', 'Contrato', 'REQ-2026-0814', 'Carlos Mateus', 'v3', 'Há 18 min'),
+  ('Certificados_PRV_Q3.zip', 'Certificação', 'REQ-2026-0812', 'Marta Miguel', 'v1', 'Hoje, 10:21'),
+  ('Acta_Rececao_PO6100380.pdf', 'Receção', 'REQ-2026-0812', 'Domingos José', 'v2', 'Ontem'),
+  ('Parecer_Fiscal_AOA.pdf', 'Compliance', 'POL-2026-04', 'Muntu Legal', 'v5', '22 Ago');

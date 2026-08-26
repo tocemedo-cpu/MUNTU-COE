@@ -7,15 +7,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const db = getDb();
   const payload = (await request.json()) as { action?: "resolve" };
 
-  const existing = db.select().from(exceptions).where(eq(exceptions.id, id)).get();
+  const [existing] = await db.select().from(exceptions).where(eq(exceptions.id, id));
   if (!existing) return Response.json({ error: "Excepção não encontrada" }, { status: 404 });
 
   if (payload.action === "resolve") {
-    const [updated] = db
+    const [updated] = await db
       .update(exceptions)
       .set({ resolved: true })
       .where(eq(exceptions.id, id))
-      .returning().all();
+      .returning();
     return Response.json({ exception: updated });
   }
 

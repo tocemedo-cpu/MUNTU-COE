@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   const payload = (await request.json()) as { email?: string; password?: string };
   const email = payload.email?.trim().toLowerCase() ?? "";
 
-  const user = db.select().from(users).where(eq(users.email, email)).get();
+  const [user] = await db.select().from(users).where(eq(users.email, email));
 
   if (!user || user.password !== payload.password) {
     return Response.json({ error: "Credenciais inválidas" }, { status: 401 });

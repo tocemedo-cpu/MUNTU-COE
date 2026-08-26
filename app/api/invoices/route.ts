@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
 
   const rows = q
-    ? db
+    ? await db
         .select()
         .from(invoices)
         .where(
@@ -19,8 +19,7 @@ export async function GET(request: Request) {
             like(invoices.status, `%${q}%`)
           )
         )
-        .all()
-    : db.select().from(invoices).all();
+    : await db.select().from(invoices);
 
   return Response.json({ invoices: rows });
 }
