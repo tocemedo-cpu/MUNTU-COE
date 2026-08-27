@@ -33,18 +33,50 @@ Abra `http://localhost:3000`.
 
 ### Perfis de demonstração (login)
 
-| Perfil | E-mail | Palavra-passe |
-| --- | --- | --- |
-| Cliente comprador | ana.manuel@operadora.ao | Muntu2026! |
-| Aprovador | joao.sebastiao@operadora.ao | Muntu2026! |
-| Operações Muntu | marta.miguel@muntucoe.ao | Muntu2026! |
-| Fornecedor | carlos.mateus@kwanzaindustrial.ao | Muntu2026! |
+| Perfil | Nível de acesso | E-mail | Palavra-passe |
+| --- | --- | --- | --- |
+| Requisitante | `requester` | ana.manuel@operadora.ao | Muntu2026! |
+| Administrador da empresa | `company_admin` | joao.sebastiao@operadora.ao | Muntu2026! |
+| Operações Muntu | `muntu_ops` | marta.miguel@muntucoe.ao | Muntu2026! |
+| Fornecedor | `supplier` | carlos.mateus@kwanzaindustrial.ao | Muntu2026! |
+
+## Personas e permissões
+
+Do lado do cliente existem duas personas, aplicadas tanto no menu (frontend) como nas rotas de API (`middleware.ts` + `lib/authz.ts` — a autorização real vive no servidor, o frontend só esconde o que o utilizador não pode usar):
+
+- **Requisitante** (`requester`) — limitado ao seu próprio workflow: consultar/criar os seus pedidos e escolher fornecedor no formulário. Sem acesso a aprovações, ordens de compra, recepções, facturas, excepções, pagamentos, relatórios, repositório ou administração — essas rotas devolvem `403` no servidor mesmo que alguém tente chamá-las directamente.
+- **Administrador da empresa** (`company_admin`) — visão abrangente: tudo o que um requisitante vê, mais aprovações, toda a execução P2P e relatórios da sua empresa.
+- **Operações Muntu** (`muntu_ops`) e **Fornecedor** (`supplier`) mantêm o acesso amplo que já tinham — não fazem parte desta reestruturação.
+
+## Login: SSO por empresa ou e-mail/password
+
+O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a que empresa pertence o domínio, e só depois decide o fluxo:
+
+- **Sem empresa registada, ou empresa com `auth_method = 'password'`** → mostra o campo de palavra-passe (fluxo actual).
+- **Empresa com `auth_method = 'sso'`** → mostra um botão que redirecciona para `/api/auth/sso/start`, que inicia um fluxo OIDC (authorization code + PKCE) genérico contra `sso_issuer_url`/`sso_client_id`/`sso_client_secret` guardados na tabela `companies`.
+
+**Isto só produz um login funcional quando a empresa fornece credenciais reais** de um fornecedor de identidade compatível com OpenID Connect Discovery (Microsoft Entra ID, Google Workspace, Okta, ...). Para activar SSO para uma empresa:
+
+1. Registe uma aplicação OIDC no IdP da empresa, com `redirect_uri` = `https://<o-seu-domínio>/api/auth/sso/callback`.
+2. Actualize a linha da empresa em `companies` (ainda sem UI de administração — via SQL directo por agora):
+   ```sql
+   update public.companies
+   set auth_method = 'sso',
+       sso_issuer_url = 'https://login.microsoftonline.com/<tenant-id>/v2.0',
+       sso_client_id = '<client-id>',
+       sso_client_secret = '<client-secret>'
+   where domain = 'exemplo.com';
+   ```
+3. O primeiro login por SSO cria automaticamente o utilizador (nível `requester` por omissão) e liga-o a essa empresa.
 
 ## Rotas de API
 
 | Rota | Métodos | Descrição |
 | --- | --- | --- |
+| `/api/auth/company-lookup` | `POST` | Resolve o domínio do e-mail para uma empresa e o seu método de login |
 | `/api/auth/login` | `POST` | Autenticação por e-mail/palavra-passe — define cookie de sessão |
+| `/api/auth/sso/start` | `GET` | Inicia o fluxo OIDC (authorization code + PKCE) da empresa |
+| `/api/auth/sso/callback` | `GET` | Troca o código OIDC por tokens, verifica o ID token e cria a sessão |
 | `/api/auth/me` | `GET` | Utilizador da sessão actual (restaura o login ao recarregar) |
 | `/api/auth/logout` | `POST` | Termina a sessão |
 | `/api/dashboard` | `GET` | Métricas agregadas do pipeline P2P |

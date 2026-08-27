@@ -1,3 +1,12 @@
+export type AccessLevel = "muntu_ops" | "supplier" | "company_admin" | "requester";
+
+export type SessionPayload = {
+  userId: number;
+  accessLevel: AccessLevel;
+  companyId: number | null;
+  exp: number;
+};
+
 const SESSION_COOKIE_NAME = "muntu_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 dias
 
@@ -26,11 +35,16 @@ async function getKey(): Promise<CryptoKey> {
   ]);
 }
 
-function toBase64Url(bytes: ArrayBuffer): string {
-  const arr = new Uint8Array(bytes);
+export function toBase64Url(bytes: ArrayBuffer | Uint8Array): string {
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let binary = "";
   for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fromBase64Url(value: string): string {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return atob(padded);
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -40,34 +54,48 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-export async function createSessionToken(userId: number): Promise<string> {
-  const expires = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
-  const payload = `${userId}.${expires}`;
+/** Assina um payload JSON qualquer com expiração — primitiva reutilizada
+ * pela sessão principal e pelo estado CSRF/PKCE do fluxo de SSO. */
+export async function signPayload<T extends object>(payload: T, ttlSeconds: number): Promise<string> {
+  const withExpiry = { ...payload, exp: Math.floor(Date.now() / 1000) + ttlSeconds };
+  const encodedPayload = toBase64Url(new TextEncoder().encode(JSON.stringify(withExpiry)));
   const key = await getKey();
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload) as BufferSource);
-  return `${payload}.${toBase64Url(signature)}`;
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(encodedPayload) as BufferSource);
+  return `${encodedPayload}.${toBase64Url(signature)}`;
 }
 
-export async function verifySessionToken(token: string | undefined | null): Promise<{ userId: number } | null> {
+export async function verifyPayload<T extends { exp: number }>(token: string | undefined | null): Promise<T | null> {
   if (!token) return null;
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [userIdStr, expiresStr, signature] = parts;
-
-  const expires = Number(expiresStr);
-  if (!Number.isFinite(expires) || expires < Math.floor(Date.now() / 1000)) return null;
+  const dot = token.lastIndexOf(".");
+  if (dot === -1) return null;
+  const encodedPayload = token.slice(0, dot);
+  const signature = token.slice(dot + 1);
 
   const key = await getKey();
   const expectedSignature = await crypto.subtle.sign(
     "HMAC",
     key,
-    new TextEncoder().encode(`${userIdStr}.${expiresStr}`) as BufferSource
+    new TextEncoder().encode(encodedPayload) as BufferSource
   );
   if (!timingSafeEqual(toBase64Url(expectedSignature), signature)) return null;
 
-  const userId = Number(userIdStr);
-  if (!Number.isFinite(userId)) return null;
-  return { userId };
+  try {
+    const payload = JSON.parse(fromBase64Url(encodedPayload)) as T;
+    if (!Number.isFinite(payload.exp) || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export async function createSessionToken(claims: Omit<SessionPayload, "exp">): Promise<string> {
+  return signPayload(claims, SESSION_TTL_SECONDS);
+}
+
+export async function verifySessionToken(token: string | undefined | null): Promise<SessionPayload | null> {
+  const payload = await verifyPayload<SessionPayload>(token);
+  if (!payload || !Number.isFinite(payload.userId)) return null;
+  return payload;
 }
 
 export { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS };

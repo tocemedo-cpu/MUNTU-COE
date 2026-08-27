@@ -1,27 +1,38 @@
-import { eq, like, or, desc } from "drizzle-orm";
+import { and, eq, like, or, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests, users } from "@/db/schema";
+import { getSession } from "@/lib/authz";
 import { parseJsonBody, requestCreateSchema } from "@/lib/validation";
 
 export async function GET(request: Request) {
   const db = getDb();
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
+  const session = getSession(request);
 
-  const rows = q
-    ? await db
-        .select()
-        .from(requests)
-        .where(
-          or(
-            like(requests.id, `%${q}%`),
-            like(requests.subject, `%${q}%`),
-            like(requests.supplier, `%${q}%`),
-            like(requests.status, `%${q}%`)
-          )
-        )
-        .orderBy(desc(requests.createdAt))
-    : await db.select().from(requests).orderBy(desc(requests.createdAt));
+  const scopeConditions = [];
+  if (session.accessLevel === "requester") {
+    scopeConditions.push(eq(requests.ownerUserId, session.userId));
+  }
+  if (session.accessLevel === "requester" || session.accessLevel === "company_admin") {
+    if (session.companyId != null) scopeConditions.push(eq(requests.companyId, session.companyId));
+  }
+  if (q) {
+    scopeConditions.push(
+      or(
+        like(requests.id, `%${q}%`),
+        like(requests.subject, `%${q}%`),
+        like(requests.supplier, `%${q}%`),
+        like(requests.status, `%${q}%`)
+      )
+    );
+  }
+
+  const rows = await db
+    .select()
+    .from(requests)
+    .where(scopeConditions.length ? and(...scopeConditions) : undefined)
+    .orderBy(desc(requests.createdAt));
 
   return Response.json({ requests: rows });
 }
@@ -32,8 +43,8 @@ export async function POST(request: Request) {
   if (!parsed.success) return parsed.response;
   const payload = parsed.data;
 
-  const userId = Number(request.headers.get("x-muntu-user-id"));
-  const [currentUser] = await db.select().from(users).where(eq(users.id, userId));
+  const session = getSession(request);
+  const [currentUser] = await db.select().from(users).where(eq(users.id, session.userId));
 
   const total = (await db.select().from(requests)).length;
   const id = `REQ-2026-${String(815 + total).padStart(4, "0")}`;
@@ -50,6 +61,8 @@ export async function POST(request: Request) {
       status: "Validação",
       priority: payload.priority ?? "Média",
       owner: currentUser?.name ?? "Desconhecido",
+      ownerUserId: session.userId,
+      companyId: session.companyId,
       sla,
       stage: 1,
       submitted: "Agora",

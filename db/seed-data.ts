@@ -1,13 +1,20 @@
+import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "./schema";
 
 type Db = PostgresJsDatabase<typeof schema>;
 
+const demoCompany = {
+  name: "Operadora Atlântico, SA",
+  domain: "operadora.ao",
+  authMethod: "password" as const,
+};
+
 const demoUsers = [
-  { name: "Ana Manuel", email: "ana.manuel@operadora.ao", password: "Muntu2026!", role: "Cliente comprador", initials: "AM" },
-  { name: "João Sebastião", email: "joao.sebastiao@operadora.ao", password: "Muntu2026!", role: "Aprovador", initials: "JS" },
-  { name: "Marta Miguel", email: "marta.miguel@muntucoe.ao", password: "Muntu2026!", role: "Operações Muntu", initials: "MM" },
-  { name: "Carlos Mateus", email: "carlos.mateus@kwanzaindustrial.ao", password: "Muntu2026!", role: "Fornecedor", initials: "CM" },
+  { name: "Ana Manuel", email: "ana.manuel@operadora.ao", password: "Muntu2026!", role: "Requisitante", initials: "AM", accessLevel: "requester" as const },
+  { name: "João Sebastião", email: "joao.sebastiao@operadora.ao", password: "Muntu2026!", role: "Administrador da empresa", initials: "JS", accessLevel: "company_admin" as const },
+  { name: "Marta Miguel", email: "marta.miguel@muntucoe.ao", password: "Muntu2026!", role: "Operações Muntu", initials: "MM", accessLevel: "muntu_ops" as const },
+  { name: "Carlos Mateus", email: "carlos.mateus@kwanzaindustrial.ao", password: "Muntu2026!", role: "Fornecedor", initials: "CM", accessLevel: "supplier" as const },
 ];
 
 const demoRequests = [
@@ -66,14 +73,33 @@ const demoDocuments = [
 ];
 
 export async function seedIfEmpty(db: Db) {
+  let company = (await db.select().from(schema.companies).where(eq(schema.companies.domain, demoCompany.domain)))[0];
+  if (!company) {
+    [company] = await db.insert(schema.companies).values(demoCompany).returning();
+  }
+
   const existingUsers = await db.select().from(schema.users).limit(1);
   if (existingUsers.length === 0) {
-    await db.insert(schema.users).values(demoUsers).onConflictDoNothing();
+    await db
+      .insert(schema.users)
+      .values(demoUsers.map((user) => ({ ...user, companyId: user.accessLevel === "company_admin" || user.accessLevel === "requester" ? company.id : null })))
+      .onConflictDoNothing();
   }
 
   const existingRequests = await db.select().from(schema.requests).limit(1);
   if (existingRequests.length === 0) {
-    await db.insert(schema.requests).values(demoRequests).onConflictDoNothing();
+    const anaManuel = (await db.select().from(schema.users).where(eq(schema.users.email, "ana.manuel@operadora.ao")))[0];
+
+    await db
+      .insert(schema.requests)
+      .values(
+        demoRequests.map((request) => ({
+          ...request,
+          companyId: company.id,
+          ownerUserId: request.owner === "Ana Manuel" ? anaManuel?.id : null,
+        }))
+      )
+      .onConflictDoNothing();
     await db.insert(schema.suppliers).values(demoSuppliers).onConflictDoNothing();
     await db.insert(schema.purchaseOrders).values(demoPurchaseOrders).onConflictDoNothing();
     await db.insert(schema.receipts).values(demoReceipts);

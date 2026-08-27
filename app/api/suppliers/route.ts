@@ -1,6 +1,7 @@
 import { like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { suppliers } from "@/db/schema";
+import { forbidUnless } from "@/lib/authz";
 import { parseJsonBody, supplierCreateSchema } from "@/lib/validation";
 
 export async function GET(request: Request) {
@@ -16,6 +17,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const forbidden = forbidUnless(request, ["company_admin", "muntu_ops"]);
+  if (forbidden) return forbidden;
+
   const db = getDb();
   const parsed = await parseJsonBody(request, supplierCreateSchema);
   if (!parsed.success) return parsed.response;

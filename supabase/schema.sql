@@ -7,15 +7,38 @@
 -- Tabelas
 -- -----------------------------------------------------------------
 
+-- Empresa cliente. O método de login (SSO federado vs. e-mail/password) é
+-- decidido por empresa a partir do domínio do e-mail. As colunas sso_* só
+-- produzem um login funcional quando a empresa fornece as credenciais
+-- reais do seu fornecedor de identidade (Entra ID, Google Workspace,
+-- Okta, ...) — ver README para o fluxo OIDC.
+create table if not exists public.companies (
+  id bigint generated always as identity primary key,
+  name text not null,
+  domain text not null unique,
+  auth_method text not null default 'password', -- 'password' | 'sso'
+  sso_issuer_url text,
+  sso_client_id text,
+  sso_client_secret text,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.users (
   id bigint generated always as identity primary key,
   name text not null,
   email text not null unique,
-  password text not null,
+  password text, -- nula para utilizadores federados por SSO
   role text not null,
   initials text not null,
   tenant text not null default 'Operadora Atlântico, SA'
 );
+
+-- Colunas adicionadas depois do lançamento inicial — seguras de repetir
+-- tanto numa instalação nova como a actualizar uma já existente.
+alter table public.users add column if not exists company_id bigint references public.companies (id);
+alter table public.users add column if not exists access_level text not null default 'requester'; -- muntu_ops | supplier | company_admin | requester
+alter table public.users add column if not exists sso_subject text;
+alter table public.users alter column password drop not null;
 
 create table if not exists public.requests (
   id text primary key,
@@ -33,6 +56,9 @@ create table if not exists public.requests (
   notes text not null default '',
   created_at timestamptz not null default now()
 );
+
+alter table public.requests add column if not exists owner_user_id bigint references public.users (id);
+alter table public.requests add column if not exists company_id bigint references public.companies (id);
 
 create table if not exists public.suppliers (
   id bigint generated always as identity primary key,
@@ -122,6 +148,7 @@ create index if not exists idx_payment_batches_released on public.payment_batche
 -- `password` de `users` através da API pública (use Supabase Auth).
 -- -----------------------------------------------------------------
 
+alter table public.companies enable row level security;
 alter table public.users enable row level security;
 alter table public.requests enable row level security;
 alter table public.suppliers enable row level security;
@@ -170,20 +197,40 @@ drop policy if exists "public write documents" on public.documents;
 create policy "public read documents" on public.documents for select using (true);
 create policy "public write documents" on public.documents for insert with check (true);
 
--- Sem política de select em `users`: mantém a tabela ilegível pela
--- API pública/anon key. O login deve chamar esta tabela apenas a
--- partir de uma rota de servidor com a service role key.
+-- Sem política de select em `users` nem em `companies`: mantém as tabelas
+-- ilegíveis pela API pública/anon key (a de companies guarda segredos de
+-- SSO). O login e o fluxo de SSO só podem correr a partir de rotas de
+-- servidor com a service role key.
 
 -- -----------------------------------------------------------------
 -- Dados de demonstração
 -- -----------------------------------------------------------------
 
+insert into public.companies (name, domain, auth_method) values
+  ('Operadora Atlântico, SA', 'operadora.ao', 'password')
+on conflict (domain) do nothing;
+
 insert into public.users (name, email, password, role, initials, tenant) values
-  ('Ana Manuel', 'ana.manuel@operadora.ao', 'Muntu2026!', 'Cliente comprador', 'AM', 'Operadora Atlântico, SA'),
-  ('João Sebastião', 'joao.sebastiao@operadora.ao', 'Muntu2026!', 'Aprovador', 'JS', 'Operadora Atlântico, SA'),
+  ('Ana Manuel', 'ana.manuel@operadora.ao', 'Muntu2026!', 'Requisitante', 'AM', 'Operadora Atlântico, SA'),
+  ('João Sebastião', 'joao.sebastiao@operadora.ao', 'Muntu2026!', 'Administrador da empresa', 'JS', 'Operadora Atlântico, SA'),
   ('Marta Miguel', 'marta.miguel@muntucoe.ao', 'Muntu2026!', 'Operações Muntu', 'MM', 'Operadora Atlântico, SA'),
   ('Carlos Mateus', 'carlos.mateus@kwanzaindustrial.ao', 'Muntu2026!', 'Fornecedor', 'CM', 'Operadora Atlântico, SA')
 on conflict (email) do nothing;
+
+-- Backfill: liga os utilizadores de demonstração à empresa e ao nível de
+-- acesso correcto. Seguro de repetir (define sempre os mesmos valores).
+update public.users
+set role = 'Requisitante', access_level = 'requester', company_id = c.id
+from public.companies c
+where c.domain = 'operadora.ao' and public.users.email = 'ana.manuel@operadora.ao';
+
+update public.users
+set role = 'Administrador da empresa', access_level = 'company_admin', company_id = c.id
+from public.companies c
+where c.domain = 'operadora.ao' and public.users.email = 'joao.sebastiao@operadora.ao';
+
+update public.users set access_level = 'muntu_ops' where email = 'marta.miguel@muntucoe.ao';
+update public.users set access_level = 'supplier' where email = 'carlos.mateus@kwanzaindustrial.ao';
 
 insert into public.requests (id, subject, tower, value, status, priority, owner, sla, stage, submitted, supplier, cost_center) values
   ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210'),
@@ -192,6 +239,18 @@ insert into public.requests (id, subject, tower, value, status, priority, owner,
   ('REQ-2026-0809', 'Consumíveis de manutenção', 'Invoice-to-Pay', 5980000, 'Excepção', 'Média', 'Ana Manuel', 'Vencido 2h', 6, '22 Ago, 08:05', 'Mwangolé Supplies', 'MRO-BASE-090'),
   ('REQ-2026-0804', 'Transporte de equipa para Soyo', 'Invoice-to-Pay', 3200000, 'Pago', 'Normal', 'Ana Manuel', 'Concluído', 7, '19 Ago, 13:37', 'Norte Logística', 'LOG-SOY-011')
 on conflict (id) do nothing;
+
+-- Backfill: liga os pedidos de demonstração à empresa e, quando o dono
+-- corresponde a um utilizador real, ao respectivo owner_user_id.
+update public.requests r
+set company_id = c.id
+from public.companies c
+where c.domain = 'operadora.ao';
+
+update public.requests r
+set owner_user_id = u.id
+from public.users u
+where u.email = 'ana.manuel@operadora.ao' and r.owner = 'Ana Manuel';
 
 insert into public.suppliers (name, category, passport, risk, local, status) values
   ('Kwanza Industrial', 'Válvulas e MRO', 96, 'Baixo', '92%', 'Activo'),
