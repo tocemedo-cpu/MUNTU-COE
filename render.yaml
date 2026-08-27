@@ -11,3 +11,5 @@ services:
         value: 20.18.1
       - key: DATABASE_URL
         sync: false
+      - key: SESSION_SECRET
+        generateValue: true

@@ -1,6 +1,6 @@
-import { like, or, desc } from "drizzle-orm";
+import { eq, like, or, desc } from "drizzle-orm";
 import { getDb } from "@/db";
-import { requests } from "@/db/schema";
+import { requests, users } from "@/db/schema";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -35,8 +35,10 @@ export async function POST(request: Request) {
     supplier?: string;
     value?: string;
     priority?: string;
-    owner?: string;
   };
+
+  const userId = Number(request.headers.get("x-muntu-user-id"));
+  const [currentUser] = await db.select().from(users).where(eq(users.id, userId));
 
   const total = (await db.select().from(requests)).length;
   const id = `REQ-2026-${String(815 + total).padStart(4, "0")}`;
@@ -52,7 +54,7 @@ export async function POST(request: Request) {
       value: Number(String(payload.value ?? "").replace(/\D/g, "")) || 0,
       status: "Validação",
       priority: payload.priority ?? "Média",
-      owner: payload.owner ?? "Ana Manuel",
+      owner: currentUser?.name ?? "Desconhecido",
       sla,
       stage: 1,
       submitted: "Agora",

@@ -105,6 +105,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
+  if (response.status === 401 && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error((data as { error?: string }).error || "Erro de comunicação com o servidor");
@@ -292,7 +295,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     try {
       const { request: created } = await api<{ request: RequestItem }>("/api/requests", {
         method: "POST",
-        body: JSON.stringify({ ...form, owner: user.name }),
+        body: JSON.stringify(form),
       });
       setRequests((items) => [created, ...items]);
       setWizardStep(1);
@@ -351,7 +354,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     try {
       const { document: created } = await api<{ document: DocumentItem }>("/api/documents", {
         method: "POST",
-        body: JSON.stringify({ name: `Documento_${documentsList.length + 1}.pdf`, type: "Geral", request: "—", owner: user.name }),
+        body: JSON.stringify({ name: `Documento_${documentsList.length + 1}.pdf`, type: "Geral", request: "—" }),
       });
       setDocumentsList((items) => [created, ...items]);
       toast.success("Documento adicionado ao repositório");
@@ -456,16 +459,61 @@ function RequestDetail({ request, onAction }: { request: RequestItem; onAction: 
 export default function HomePage() {
   const [screen, setScreen] = useState<"public" | "login" | "portal">("public");
   const [user, setUser] = useState<AuthUser | null>(null);
-
-  useEffect(() => { const hash = window.location.hash; if (hash === "#login") setScreen("login"); }, []);
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   const navigate = (next: "public" | "login" | "portal") => { setScreen(next); window.history.replaceState(null, "", next === "public" ? window.location.pathname : `#${next}`); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
+  useEffect(() => {
+    const hash = window.location.hash;
+    (async () => {
+      try {
+        // Fetch directo (não usa api()) para não disparar o evento de
+        // "sessão expirada" numa visita sem sessão nenhuma — um 401 aqui
+        // é o resultado normal de ainda não ter feito login.
+        const response = await fetch("/api/auth/me");
+        if (response.ok) {
+          const { user: restored } = (await response.json()) as { user: AuthUser };
+          setUser(restored);
+          setScreen("portal");
+        } else if (hash === "#login") {
+          setScreen("login");
+        }
+      } catch {
+        if (hash === "#login") setScreen("login");
+      } finally {
+        setSessionChecked(true);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setUser(null);
+      navigate("login");
+      toast.error("Sessão expirada. Inicie sessão novamente.");
+    };
+    window.addEventListener("muntu:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("muntu:unauthorized", onUnauthorized);
+  }, []);
+
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      toast.success("Sessão terminada");
+      setUser(null);
+      navigate("public");
+    }
+  };
+
+  if (!sessionChecked) {
+    return <div className="empty-state panel"><Sparkles /><h3>A carregar…</h3></div>;
+  }
   if (screen === "login" || (screen === "portal" && !user)) {
     return <><Toaster richColors position="top-right" /><Login onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} /></>;
   }
   if (screen === "portal" && user) {
-    return <Portal user={user} onLogout={() => { toast.success("Sessão terminada"); setUser(null); navigate("public"); }} />;
+    return <Portal user={user} onLogout={logout} />;
   }
   return <PublicSite onLogin={() => navigate("login")} />;
 }

@@ -1,6 +1,6 @@
-import { like, or } from "drizzle-orm";
+import { eq, like, or } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documents } from "@/db/schema";
+import { documents, users } from "@/db/schema";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -30,12 +30,14 @@ export async function POST(request: Request) {
     name?: string;
     type?: string;
     request?: string;
-    owner?: string;
   };
 
   if (!payload.name?.trim()) {
     return Response.json({ error: "O nome do documento é obrigatório" }, { status: 400 });
   }
+
+  const userId = Number(request.headers.get("x-muntu-user-id"));
+  const [currentUser] = await db.select().from(users).where(eq(users.id, userId));
 
   const [created] = await db
     .insert(documents)
@@ -43,7 +45,7 @@ export async function POST(request: Request) {
       name: payload.name.trim(),
       type: payload.type?.trim() || "Documento",
       request: payload.request?.trim() || "—",
-      owner: payload.owner?.trim() || "Ana Manuel",
+      owner: currentUser?.name ?? "Desconhecido",
       version: "v1",
       updated: "Agora",
     })

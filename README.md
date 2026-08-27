@@ -44,7 +44,9 @@ Abra `http://localhost:3000`.
 
 | Rota | Métodos | Descrição |
 | --- | --- | --- |
-| `/api/auth/login` | `POST` | Autenticação por e-mail/palavra-passe |
+| `/api/auth/login` | `POST` | Autenticação por e-mail/palavra-passe — define cookie de sessão |
+| `/api/auth/me` | `GET` | Utilizador da sessão actual (restaura o login ao recarregar) |
+| `/api/auth/logout` | `POST` | Termina a sessão |
 | `/api/dashboard` | `GET` | Métricas agregadas do pipeline P2P |
 | `/api/requests` | `GET`, `POST` | Listar/criar pedidos |
 | `/api/requests/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar pedido |
@@ -58,6 +60,8 @@ Abra `http://localhost:3000`.
 | `/api/payments` | `GET` | Lotes de pagamento |
 | `/api/payments/:id` | `PATCH` | Libertar pagamento |
 | `/api/documents` | `GET`, `POST` | Repositório documental |
+
+Todas as rotas excepto `/api/auth/login` e `/api/auth/logout` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
 
 ## Deploy no Render
 
