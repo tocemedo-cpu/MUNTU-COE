@@ -132,26 +132,41 @@ alter table public.exceptions enable row level security;
 alter table public.payment_batches enable row level security;
 alter table public.documents enable row level security;
 
+drop policy if exists "public read requests" on public.requests;
+drop policy if exists "public write requests" on public.requests;
+drop policy if exists "public update requests" on public.requests;
 create policy "public read requests" on public.requests for select using (true);
 create policy "public write requests" on public.requests for insert with check (true);
 create policy "public update requests" on public.requests for update using (true);
 
+drop policy if exists "public read suppliers" on public.suppliers;
+drop policy if exists "public write suppliers" on public.suppliers;
 create policy "public read suppliers" on public.suppliers for select using (true);
 create policy "public write suppliers" on public.suppliers for insert with check (true);
 
+drop policy if exists "public read purchase_orders" on public.purchase_orders;
 create policy "public read purchase_orders" on public.purchase_orders for select using (true);
 
+drop policy if exists "public read receipts" on public.receipts;
+drop policy if exists "public update receipts" on public.receipts;
 create policy "public read receipts" on public.receipts for select using (true);
 create policy "public update receipts" on public.receipts for update using (true);
 
+drop policy if exists "public read invoices" on public.invoices;
 create policy "public read invoices" on public.invoices for select using (true);
 
+drop policy if exists "public read exceptions" on public.exceptions;
+drop policy if exists "public update exceptions" on public.exceptions;
 create policy "public read exceptions" on public.exceptions for select using (true);
 create policy "public update exceptions" on public.exceptions for update using (true);
 
+drop policy if exists "public read payment_batches" on public.payment_batches;
+drop policy if exists "public update payment_batches" on public.payment_batches;
 create policy "public read payment_batches" on public.payment_batches for select using (true);
 create policy "public update payment_batches" on public.payment_batches for update using (true);
 
+drop policy if exists "public read documents" on public.documents;
+drop policy if exists "public write documents" on public.documents;
 create policy "public read documents" on public.documents for select using (true);
 create policy "public write documents" on public.documents for insert with check (true);
 
