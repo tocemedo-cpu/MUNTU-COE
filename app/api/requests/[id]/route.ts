@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { requests } from "@/db/schema";
+import { purchaseOrders, requests } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
+import { classifyPoTier } from "@/lib/billing";
 import { parseJsonBody, requestActionSchema } from "@/lib/validation";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -40,6 +41,27 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     })
     .where(eq(requests.id, id))
     .returning();
+
+  // Aprovar gera a PO ligada ao pedido — é isto que alimenta a execução
+  // P2P (e, mais tarde, a facturação de actividade) com dados reais em
+  // vez de datasets paralelos sem ligação nenhuma ao pedido de origem.
+  if (approve) {
+    const [existingPo] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.requestId, id));
+    if (!existingPo) {
+      const poCount = (await db.select().from(purchaseOrders)).length;
+      await db.insert(purchaseOrders).values({
+        id: `PO-${6100400 + poCount}`,
+        supplier: existing.supplier,
+        description: existing.subject,
+        value: existing.value,
+        status: "Confirmado",
+        nextAction: "Expediting",
+        requestId: existing.id,
+        companyId: existing.companyId,
+        tier: classifyPoTier(existing.type),
+      });
+    }
+  }
 
   return Response.json({ request: updated });
 }

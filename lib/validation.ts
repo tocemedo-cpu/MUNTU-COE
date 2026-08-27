@@ -62,3 +62,14 @@ export const userAccessUpdateSchema = z.object({
   accessLevel: z.enum(["system_admin", "coe_manager", "analyst", "supplier", "company_admin", "requester"]),
   companyId: z.number().int().positive().nullable().optional(),
 });
+
+export const clientInvoiceGenerateSchema = z.object({
+  companyId: z.number().int().positive(),
+  periodStart: z.string().trim().min(1, "Data de início é obrigatória"),
+  periodEnd: z.string().trim().min(1, "Data de fim é obrigatória"),
+  scope: z.enum(["parcial", "total"]).default("total"),
+});
+
+export const clientInvoiceActionSchema = z.object({
+  action: z.enum(["approve", "reject", "send_to_accounting"]),
+});

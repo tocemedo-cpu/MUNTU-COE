@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { classifyInvoiceTier } from "../lib/billing-tiers";
 import * as schema from "./schema";
 
 type Db = PostgresJsDatabase<typeof schema>;
@@ -20,11 +21,11 @@ const demoUsers = [
 ];
 
 const demoRequests = [
-  { id: "REQ-2026-0814", subject: "Válvulas de controlo — Kizomba B", tower: "Requisition-to-PO", value: 84_000_000, status: "Aprovação", priority: "Alta", owner: "Carlos Mateus", sla: "03h 12m", stage: 2, submitted: "26 Ago, 09:14", supplier: "Kwanza Industrial", costCenter: "OFS-OPS-210" },
-  { id: "REQ-2026-0813", subject: "Inspecção NDT offshore", tower: "Serviços técnicos", value: 31_600_000, status: "Em execução", priority: "Alta", owner: "Marta Miguel", sla: "18h 40m", stage: 3, submitted: "25 Ago, 15:42", supplier: "Atlântico Integrity", costCenter: "INT-B15-105" },
-  { id: "REQ-2026-0812", subject: "Calibração de PRV — campanha Q3", tower: "PO-to-Receipt", value: 12_450_000, status: "Receção", priority: "Média", owner: "Domingos José", sla: "1d 04h", stage: 4, submitted: "24 Ago, 11:20", supplier: "Luanda Calibration Services", costCenter: "MAI-PRV-330" },
-  { id: "REQ-2026-0809", subject: "Consumíveis de manutenção", tower: "Invoice-to-Pay", value: 5_980_000, status: "Excepção", priority: "Média", owner: "Ana Manuel", sla: "Vencido 2h", stage: 6, submitted: "22 Ago, 08:05", supplier: "Mwangolé Supplies", costCenter: "MRO-BASE-090" },
-  { id: "REQ-2026-0804", subject: "Transporte de equipa para Soyo", tower: "Invoice-to-Pay", value: 3_200_000, status: "Pago", priority: "Normal", owner: "Ana Manuel", sla: "Concluído", stage: 7, submitted: "19 Ago, 13:37", supplier: "Norte Logística", costCenter: "LOG-SOY-011" },
+  { id: "REQ-2026-0814", subject: "Válvulas de controlo — Kizomba B", tower: "Requisition-to-PO", type: "PO standard", value: 84_000_000, status: "Aprovação", priority: "Alta", owner: "Carlos Mateus", sla: "03h 12m", stage: 2, submitted: "26 Ago, 09:14", supplier: "Kwanza Industrial", costCenter: "OFS-OPS-210" },
+  { id: "REQ-2026-0813", subject: "Inspecção NDT offshore", tower: "Serviços técnicos", type: "Compra urgente", value: 31_600_000, status: "Em execução", priority: "Alta", owner: "Marta Miguel", sla: "18h 40m", stage: 3, submitted: "25 Ago, 15:42", supplier: "Atlântico Integrity", costCenter: "INT-B15-105" },
+  { id: "REQ-2026-0812", subject: "Calibração de PRV — campanha Q3", tower: "PO-to-Receipt", type: "PO standard", value: 12_450_000, status: "Receção", priority: "Média", owner: "Domingos José", sla: "1d 04h", stage: 4, submitted: "24 Ago, 11:20", supplier: "Luanda Calibration Services", costCenter: "MAI-PRV-330" },
+  { id: "REQ-2026-0809", subject: "Consumíveis de manutenção", tower: "Invoice-to-Pay", type: "PO catalogado", value: 5_980_000, status: "Excepção", priority: "Média", owner: "Ana Manuel", sla: "Vencido 2h", stage: 6, submitted: "22 Ago, 08:05", supplier: "Mwangolé Supplies", costCenter: "MRO-BASE-090" },
+  { id: "REQ-2026-0804", subject: "Transporte de equipa para Soyo", tower: "Invoice-to-Pay", type: "PO standard", value: 3_200_000, status: "Pago", priority: "Normal", owner: "Ana Manuel", sla: "Concluído", stage: 7, submitted: "19 Ago, 13:37", supplier: "Norte Logística", costCenter: "LOG-SOY-011" },
 ];
 
 const demoSuppliers = [
@@ -36,10 +37,10 @@ const demoSuppliers = [
 ];
 
 const demoPurchaseOrders = [
-  { id: "PO-6100432", supplier: "Kwanza Industrial", description: "Válvulas de controlo", value: 84_000_000, status: "Expediting", nextAction: "02 Set" },
-  { id: "PO-6100424", supplier: "Atlântico Integrity", description: "Inspecção NDT offshore", value: 31_600_000, status: "Confirmado", nextAction: "30 Ago" },
-  { id: "PO-6100411", supplier: "Mwangolé Supplies", description: "Consumíveis MRO", value: 5_980_000, status: "Excepção", nextAction: "Hoje" },
-  { id: "PO-6100380", supplier: "Luanda Calibration Services", description: "Calibração PRV", value: 12_450_000, status: "Entregue", nextAction: "Receber" },
+  { id: "PO-6100432", supplier: "Kwanza Industrial", description: "Válvulas de controlo", value: 84_000_000, status: "Expediting", nextAction: "02 Set", tier: "standard" as const },
+  { id: "PO-6100424", supplier: "Atlântico Integrity", description: "Inspecção NDT offshore", value: 31_600_000, status: "Confirmado", nextAction: "30 Ago", tier: "complexo" as const },
+  { id: "PO-6100411", supplier: "Mwangolé Supplies", description: "Consumíveis MRO", value: 5_980_000, status: "Excepção", nextAction: "Hoje", tier: "automatico" as const },
+  { id: "PO-6100380", supplier: "Luanda Calibration Services", description: "Calibração PRV", value: 12_450_000, status: "Entregue", nextAction: "Receber", tier: "standard" as const },
 ];
 
 const demoReceipts = [
@@ -103,11 +104,32 @@ export async function seedIfEmpty(db: Db) {
       )
       .onConflictDoNothing();
     await db.insert(schema.suppliers).values(demoSuppliers).onConflictDoNothing();
-    await db.insert(schema.purchaseOrders).values(demoPurchaseOrders).onConflictDoNothing();
+    await db
+      .insert(schema.purchaseOrders)
+      .values(demoPurchaseOrders.map((po) => ({ ...po, companyId: company.id })))
+      .onConflictDoNothing();
     await db.insert(schema.receipts).values(demoReceipts);
-    await db.insert(schema.invoices).values(demoInvoices).onConflictDoNothing();
+    await db
+      .insert(schema.invoices)
+      .values(demoInvoices.map((invoice) => ({ ...invoice, companyId: company.id, tier: classifyInvoiceTier(invoice) })))
+      .onConflictDoNothing();
     await db.insert(schema.exceptions).values(demoExceptions).onConflictDoNothing();
     await db.insert(schema.paymentBatches).values(demoPaymentBatches).onConflictDoNothing();
     await db.insert(schema.documents).values(demoDocuments);
+  }
+
+  const existingRates = await db.select().from(schema.billingRates).limit(1);
+  if (existingRates.length === 0) {
+    await db
+      .insert(schema.billingRates)
+      .values([
+        { key: "po_automatico", label: "PO automático/catalogado", amount: 7_000 },
+        { key: "po_standard", label: "PO standard assistido", amount: 10_500 },
+        { key: "po_complexo", label: "PO complexo/urgente", amount: 26_500 },
+        { key: "invoice_limpa", label: "Factura limpa (3-way match)", amount: 3_750 },
+        { key: "invoice_assistida", label: "Factura standard assistida", amount: 5_500 },
+        { key: "invoice_excecao", label: "Factura com excepção/disputa", amount: 11_500 },
+      ])
+      .onConflictDoNothing();
   }
 }

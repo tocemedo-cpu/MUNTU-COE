@@ -23,6 +23,10 @@ create table if not exists public.companies (
   created_at timestamptz not null default now()
 );
 
+-- Retainer mensal negociado (AOA). Sem valor definido, a facturação de
+-- actividade usa 0 para esta linha — Estudo de Viabilidade §32.4/53.1.
+alter table public.companies add column if not exists retainer_amount bigint not null default 0;
+
 create table if not exists public.users (
   id bigint generated always as identity primary key,
   name text not null,
@@ -36,7 +40,7 @@ create table if not exists public.users (
 -- Colunas adicionadas depois do lançamento inicial — seguras de repetir
 -- tanto numa instalação nova como a actualizar uma já existente.
 alter table public.users add column if not exists company_id bigint references public.companies (id);
-alter table public.users add column if not exists access_level text not null default 'requester'; -- muntu_ops | supplier | company_admin | requester
+alter table public.users add column if not exists access_level text not null default 'requester'; -- system_admin | coe_manager | analyst | supplier | company_admin | requester
 alter table public.users add column if not exists sso_subject text;
 alter table public.users alter column password drop not null;
 
@@ -59,6 +63,9 @@ create table if not exists public.requests (
 
 alter table public.requests add column if not exists owner_user_id bigint references public.users (id);
 alter table public.requests add column if not exists company_id bigint references public.companies (id);
+-- Tipo de transacção do wizard — determina o tier de facturação da PO
+-- gerada na aprovação (ver lib/billing.ts).
+alter table public.requests add column if not exists type text not null default 'PO standard';
 
 create table if not exists public.suppliers (
   id bigint generated always as identity primary key,
@@ -80,6 +87,11 @@ create table if not exists public.purchase_orders (
   next_action text not null default ''
 );
 
+alter table public.purchase_orders add column if not exists request_id text references public.requests (id);
+alter table public.purchase_orders add column if not exists company_id bigint references public.companies (id);
+alter table public.purchase_orders add column if not exists tier text not null default 'standard'; -- automatico | standard | complexo
+alter table public.purchase_orders add column if not exists created_at timestamptz not null default now();
+
 create table if not exists public.receipts (
   id bigint generated always as identity primary key,
   po text not null,
@@ -99,6 +111,10 @@ create table if not exists public.invoices (
   status text not null,
   due text not null
 );
+
+alter table public.invoices add column if not exists company_id bigint references public.companies (id);
+alter table public.invoices add column if not exists tier text not null default 'assistida'; -- limpa | assistida | excecao
+alter table public.invoices add column if not exists created_at timestamptz not null default now();
 
 create table if not exists public.exceptions (
   id text primary key,
@@ -127,6 +143,44 @@ create table if not exists public.documents (
   owner text not null,
   version text not null default 'v1',
   updated text not null
+);
+
+-- Preço por unidade (Estudo de Viabilidade §32.4/53.1 — modelo híbrido
+-- retainer + PO + factura). Editável via SQL directo por agora.
+create table if not exists public.billing_rates (
+  key text primary key, -- po_automatico | po_standard | po_complexo | invoice_limpa | invoice_assistida | invoice_excecao
+  label text not null,
+  amount bigint not null,
+  updated_at timestamptz not null default now()
+);
+
+-- Factura de cobrança da Muntu a uma empresa cliente (distinta de
+-- `invoices`, que são facturas de fornecedor no fluxo Invoice-to-Pay).
+create table if not exists public.client_invoices (
+  id text primary key,
+  company_id bigint not null references public.companies (id),
+  period_start text not null,
+  period_end text not null,
+  scope text not null default 'total', -- parcial | total
+  status text not null default 'pendente_aprovacao', -- pendente_aprovacao | aprovada | rejeitada | enviada_contabilidade
+  generated_by text not null default 'manual', -- automatico | manual
+  retainer_amount bigint not null default 0,
+  po_amount bigint not null default 0,
+  invoice_amount bigint not null default 0,
+  total_amount bigint not null default 0,
+  created_at timestamptz not null default now(),
+  reviewed_by_user_id bigint references public.users (id),
+  reviewed_at timestamptz
+);
+
+create table if not exists public.client_invoice_lines (
+  id bigint generated always as identity primary key,
+  client_invoice_id text not null references public.client_invoices (id),
+  kind text not null, -- retainer | po | invoice
+  reference_id text,
+  tier text,
+  description text not null,
+  amount bigint not null
 );
 
 -- -----------------------------------------------------------------
@@ -158,6 +212,9 @@ alter table public.invoices enable row level security;
 alter table public.exceptions enable row level security;
 alter table public.payment_batches enable row level security;
 alter table public.documents enable row level security;
+alter table public.billing_rates enable row level security;
+alter table public.client_invoices enable row level security;
+alter table public.client_invoice_lines enable row level security;
 
 drop policy if exists "public read requests" on public.requests;
 drop policy if exists "public write requests" on public.requests;
@@ -197,10 +254,11 @@ drop policy if exists "public write documents" on public.documents;
 create policy "public read documents" on public.documents for select using (true);
 create policy "public write documents" on public.documents for insert with check (true);
 
--- Sem política de select em `users` nem em `companies`: mantém as tabelas
--- ilegíveis pela API pública/anon key (a de companies guarda segredos de
--- SSO). O login e o fluxo de SSO só podem correr a partir de rotas de
--- servidor com a service role key.
+-- Sem política de select em `users`, `companies`, `billing_rates`,
+-- `client_invoices` nem `client_invoice_lines`: mantém-nas ilegíveis pela
+-- API pública/anon key (segredos de SSO e dados financeiros). Login, SSO
+-- e facturação só podem correr a partir de rotas de servidor com a
+-- service role key.
 
 -- -----------------------------------------------------------------
 -- Dados de demonstração
@@ -239,12 +297,12 @@ update public.users set access_level = 'analyst' where email = 'sofia.neto@muntu
 update public.users set access_level = 'system_admin' where email = 'rui.domingos@muntucoe.ao';
 update public.users set access_level = 'supplier' where email = 'carlos.mateus@kwanzaindustrial.ao';
 
-insert into public.requests (id, subject, tower, value, status, priority, owner, sla, stage, submitted, supplier, cost_center) values
-  ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210'),
-  ('REQ-2026-0813', 'Inspecção NDT offshore', 'Serviços técnicos', 31600000, 'Em execução', 'Alta', 'Marta Miguel', '18h 40m', 3, '25 Ago, 15:42', 'Atlântico Integrity', 'INT-B15-105'),
-  ('REQ-2026-0812', 'Calibração de PRV — campanha Q3', 'PO-to-Receipt', 12450000, 'Receção', 'Média', 'Domingos José', '1d 04h', 4, '24 Ago, 11:20', 'Luanda Calibration Services', 'MAI-PRV-330'),
-  ('REQ-2026-0809', 'Consumíveis de manutenção', 'Invoice-to-Pay', 5980000, 'Excepção', 'Média', 'Ana Manuel', 'Vencido 2h', 6, '22 Ago, 08:05', 'Mwangolé Supplies', 'MRO-BASE-090'),
-  ('REQ-2026-0804', 'Transporte de equipa para Soyo', 'Invoice-to-Pay', 3200000, 'Pago', 'Normal', 'Ana Manuel', 'Concluído', 7, '19 Ago, 13:37', 'Norte Logística', 'LOG-SOY-011')
+insert into public.requests (id, subject, tower, type, value, status, priority, owner, sla, stage, submitted, supplier, cost_center) values
+  ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 'PO standard', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210'),
+  ('REQ-2026-0813', 'Inspecção NDT offshore', 'Serviços técnicos', 'Compra urgente', 31600000, 'Em execução', 'Alta', 'Marta Miguel', '18h 40m', 3, '25 Ago, 15:42', 'Atlântico Integrity', 'INT-B15-105'),
+  ('REQ-2026-0812', 'Calibração de PRV — campanha Q3', 'PO-to-Receipt', 'PO standard', 12450000, 'Receção', 'Média', 'Domingos José', '1d 04h', 4, '24 Ago, 11:20', 'Luanda Calibration Services', 'MAI-PRV-330'),
+  ('REQ-2026-0809', 'Consumíveis de manutenção', 'Invoice-to-Pay', 'PO catalogado', 5980000, 'Excepção', 'Média', 'Ana Manuel', 'Vencido 2h', 6, '22 Ago, 08:05', 'Mwangolé Supplies', 'MRO-BASE-090'),
+  ('REQ-2026-0804', 'Transporte de equipa para Soyo', 'Invoice-to-Pay', 'PO standard', 3200000, 'Pago', 'Normal', 'Ana Manuel', 'Concluído', 7, '19 Ago, 13:37', 'Norte Logística', 'LOG-SOY-011')
 on conflict (id) do nothing;
 
 -- Backfill: liga os pedidos de demonstração à empresa e, quando o dono
@@ -267,11 +325,11 @@ insert into public.suppliers (name, category, passport, risk, local, status) val
   ('Norte Logística', 'Transporte', 91, 'Baixo', '100%', 'Activo')
 on conflict (name) do nothing;
 
-insert into public.purchase_orders (id, supplier, description, value, status, next_action) values
-  ('PO-6100432', 'Kwanza Industrial', 'Válvulas de controlo', 84000000, 'Expediting', '02 Set'),
-  ('PO-6100424', 'Atlântico Integrity', 'Inspecção NDT offshore', 31600000, 'Confirmado', '30 Ago'),
-  ('PO-6100411', 'Mwangolé Supplies', 'Consumíveis MRO', 5980000, 'Excepção', 'Hoje'),
-  ('PO-6100380', 'Luanda Calibration Services', 'Calibração PRV', 12450000, 'Entregue', 'Receber')
+insert into public.purchase_orders (id, supplier, description, value, status, next_action, tier) values
+  ('PO-6100432', 'Kwanza Industrial', 'Válvulas de controlo', 84000000, 'Expediting', '02 Set', 'standard'),
+  ('PO-6100424', 'Atlântico Integrity', 'Inspecção NDT offshore', 31600000, 'Confirmado', '30 Ago', 'complexo'),
+  ('PO-6100411', 'Mwangolé Supplies', 'Consumíveis MRO', 5980000, 'Excepção', 'Hoje', 'automatico'),
+  ('PO-6100380', 'Luanda Calibration Services', 'Calibração PRV', 12450000, 'Entregue', 'Receber', 'standard')
 on conflict (id) do nothing;
 
 insert into public.receipts (po, description, supplier, value, progress, status) values
@@ -285,6 +343,32 @@ insert into public.invoices (id, supplier, po, value, match, status, due) values
   ('FT-2026-1186', 'Norte Logística', 'PO-6100398', 3200000, '3-way match', 'Pago', 'Concluído'),
   ('FT-2026-1179', 'Luanda Calibration Services', 'PO-6100380', 12450000, 'Receção em falta', 'Pendente', '29 Ago')
 on conflict (id) do nothing;
+
+-- Backfill: liga POs e facturas de demonstração à empresa, e classifica
+-- o tier de facturação (mesma regra de lib/billing.ts).
+update public.purchase_orders po
+set company_id = c.id
+from public.companies c
+where c.domain = 'operadora.ao';
+
+update public.invoices i
+set company_id = c.id,
+    tier = case
+      when i.status = 'Excepção' then 'excecao'
+      when i.match = '3-way match' then 'limpa'
+      else 'assistida'
+    end
+from public.companies c
+where c.domain = 'operadora.ao';
+
+insert into public.billing_rates (key, label, amount) values
+  ('po_automatico', 'PO automático/catalogado', 7000),
+  ('po_standard', 'PO standard assistido', 10500),
+  ('po_complexo', 'PO complexo/urgente', 26500),
+  ('invoice_limpa', 'Factura limpa (3-way match)', 3750),
+  ('invoice_assistida', 'Factura standard assistida', 5500),
+  ('invoice_excecao', 'Factura com excepção/disputa', 11500)
+on conflict (key) do nothing;
 
 insert into public.exceptions (id, title, ref, owner, age, impact) values
   ('EXC-0264', 'Preço da factura diverge do PO em 4,8%', 'FT-2026-1192 • PO-6100411', 'Comprador', '2h 14m', 'AOA 286 000'),

@@ -26,6 +26,7 @@ import {
   Home,
   Inbox,
   KeyRound,
+  Landmark,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -64,7 +65,7 @@ import { Toaster } from "@/components/ui/sonner";
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
   | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
-  | "reports" | "repository" | "admin" | "users";
+  | "reports" | "repository" | "admin" | "users" | "billing";
 
 type RequestItem = {
   id: string;
@@ -282,15 +283,16 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   repository: ["company_admin", "analyst", "coe_manager", "system_admin"],
   admin: ["system_admin"],
   users: ["system_admin"],
+  billing: ["system_admin"],
 };
 
 const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
   { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
-  { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }] },
+  { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -465,6 +467,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} />}
           {view === "admin" && <Administration user={user} />}
           {view === "users" && <UsersAdmin />}
+          {view === "billing" && <ClientBilling />}
         </>}
       </main>
     </section>
@@ -496,7 +499,7 @@ function RequestsTable({ title, subtitle, requests, onSelect }: { title: string;
 function NewRequest({ step, setStep, form, setForm, submit, suppliers }: { step: number; setStep: (step: number) => void; form: Record<string, string>; setForm: React.Dispatch<React.SetStateAction<{ tower: string; type: string; subject: string; costCenter: string; supplier: string; value: string; due: string; approver: string; priority: string; notes: string }>>; submit: () => void; suppliers: Supplier[] }) {
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
   return <><PageHeader kicker="INTAKE E TRIAGEM" title="Novo pedido" description="Uma entrada estruturada alimenta workflow, SLA e repositório automaticamente." /><section className="wizard-shell"><div className="wizard-progress">{["Tipo", "Detalhes", "Aprovação", "Confirmar"].map((label, index) => <button key={label} className={step === index + 1 ? "active" : step > index + 1 ? "done" : ""} onClick={() => step > index + 1 && setStep(index + 1)}><span>{step > index + 1 ? <Check /> : index + 1}</span><div><strong>{label}</strong><small>{["Torre e transacção", "Dados e anexos", "Matriz e SLA", "Revisão final"][index]}</small></div></button>)}</div><div className="wizard-content">
-    {step === 1 && <div className="wizard-step"><p className="kicker">PASSO 1 DE 4</p><h2>Que trabalho precisa de iniciar?</h2><p>Escolha a torre operacional e o tipo de transacção.</p><div className="option-grid"><button className={form.tower === "Requisition-to-PO" ? "selected" : ""} onClick={() => update("tower", "Requisition-to-PO")}><ShoppingCart /><span><strong>Requisition-to-PO</strong><small>Criação, validação, aprovação e emissão de PO</small></span>{form.tower === "Requisition-to-PO" && <CheckCircle2 />}</button><button className={form.tower === "PO-to-Receipt" ? "selected" : ""} onClick={() => update("tower", "PO-to-Receipt")}><PackageCheck /><span><strong>PO-to-Receipt</strong><small>Expediting, entrega, qualidade e recepção</small></span>{form.tower === "PO-to-Receipt" && <CheckCircle2 />}</button><button className={form.tower === "Invoice-to-Pay" ? "selected" : ""} onClick={() => update("tower", "Invoice-to-Pay")}><ReceiptText /><span><strong>Invoice-to-Pay</strong><small>Factura, match, excepção e preparação do pagamento</small></span>{form.tower === "Invoice-to-Pay" && <CheckCircle2 />}</button><button className={form.tower === "Supplier Management" ? "selected" : ""} onClick={() => update("tower", "Supplier Management")}><Users /><span><strong>Supplier Management</strong><small>Onboarding, Supplier Passport, risco e desempenho</small></span>{form.tower === "Supplier Management" && <CheckCircle2 />}</button></div><label className="form-field">Tipo de transacção<NativeSelect value={form.type} onChange={(event) => update("type", event.target.value)} className="field-control"><NativeSelectOption>PO standard</NativeSelectOption><NativeSelectOption>Serviço técnico</NativeSelectOption><NativeSelectOption>Compra urgente</NativeSelectOption><NativeSelectOption>Contrato / Call-off</NativeSelectOption></NativeSelect></label></div>}
+    {step === 1 && <div className="wizard-step"><p className="kicker">PASSO 1 DE 4</p><h2>Que trabalho precisa de iniciar?</h2><p>Escolha a torre operacional e o tipo de transacção.</p><div className="option-grid"><button className={form.tower === "Requisition-to-PO" ? "selected" : ""} onClick={() => update("tower", "Requisition-to-PO")}><ShoppingCart /><span><strong>Requisition-to-PO</strong><small>Criação, validação, aprovação e emissão de PO</small></span>{form.tower === "Requisition-to-PO" && <CheckCircle2 />}</button><button className={form.tower === "PO-to-Receipt" ? "selected" : ""} onClick={() => update("tower", "PO-to-Receipt")}><PackageCheck /><span><strong>PO-to-Receipt</strong><small>Expediting, entrega, qualidade e recepção</small></span>{form.tower === "PO-to-Receipt" && <CheckCircle2 />}</button><button className={form.tower === "Invoice-to-Pay" ? "selected" : ""} onClick={() => update("tower", "Invoice-to-Pay")}><ReceiptText /><span><strong>Invoice-to-Pay</strong><small>Factura, match, excepção e preparação do pagamento</small></span>{form.tower === "Invoice-to-Pay" && <CheckCircle2 />}</button><button className={form.tower === "Supplier Management" ? "selected" : ""} onClick={() => update("tower", "Supplier Management")}><Users /><span><strong>Supplier Management</strong><small>Onboarding, Supplier Passport, risco e desempenho</small></span>{form.tower === "Supplier Management" && <CheckCircle2 />}</button></div><label className="form-field">Tipo de transacção<NativeSelect value={form.type} onChange={(event) => update("type", event.target.value)} className="field-control"><NativeSelectOption>PO standard</NativeSelectOption><NativeSelectOption>PO catalogado</NativeSelectOption><NativeSelectOption>Serviço técnico</NativeSelectOption><NativeSelectOption>Compra urgente</NativeSelectOption><NativeSelectOption>Contrato / Call-off</NativeSelectOption></NativeSelect></label></div>}
     {step === 2 && <div className="wizard-step"><p className="kicker">PASSO 2 DE 4</p><h2>Detalhes do pedido</h2><p>Inclua informação suficiente para a validação começar sem devoluções.</p><div className="form-grid"><label className="form-field span-2">Título do pedido<Input value={form.subject} onChange={(event) => update("subject", event.target.value)} placeholder="Ex.: Válvulas de controlo para campanha offshore" /></label><label className="form-field">Centro de custo<Input value={form.costCenter} onChange={(event) => update("costCenter", event.target.value)} /></label><label className="form-field">Fornecedor preferencial<NativeSelect value={form.supplier} onChange={(event) => update("supplier", event.target.value)} className="field-control">{suppliers.map((supplier) => <NativeSelectOption key={supplier.name}>{supplier.name}</NativeSelectOption>)}</NativeSelect></label><label className="form-field">Valor estimado (AOA)<Input inputMode="numeric" value={form.value} onChange={(event) => update("value", event.target.value)} placeholder="84 000 000" /></label><label className="form-field">Data necessária<Input type="date" value={form.due} onChange={(event) => update("due", event.target.value)} /></label><label className="form-field span-2">Escopo e contexto<Textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Explique a necessidade, o local de entrega e os requisitos críticos…" /></label><button className="upload-zone span-2" onClick={() => toast.success("Anexo de demonstração adicionado")}><UploadCloud /><strong>Adicionar documentos</strong><span>Especificação, cotação, desenho ou justificativo • PDF, XLSX, DOCX, ZIP</span></button></div></div>}
     {step === 3 && <div className="wizard-step"><p className="kicker">PASSO 3 DE 4</p><h2>Aprovação e prioridade</h2><p>A regra sugerida usa o valor, centro de custo e tipo de pedido.</p><div className="approval-card"><span><ShieldCheck /></span><div><small>ROTA RECOMENDADA</small><strong>Solicitante → Director de Operações → Finanças</strong><p>O Muntu valida o dossier antes de iniciar a aprovação. Valor acima de AOA 50M requer dupla aprovação.</p></div></div><div className="form-grid"><label className="form-field span-2">Aprovador principal<NativeSelect value={form.approver} onChange={(event) => update("approver", event.target.value)} className="field-control"><NativeSelectOption>João Sebastião — Director de Operações</NativeSelectOption><NativeSelectOption>Maria José — Directora Financeira</NativeSelectOption><NativeSelectOption>Paulo Agostinho — Director de Supply Chain</NativeSelectOption></NativeSelect></label><label className="form-field">Prioridade<NativeSelect value={form.priority} onChange={(event) => update("priority", event.target.value)} className="field-control"><NativeSelectOption>Normal</NativeSelectOption><NativeSelectOption>Média</NativeSelectOption><NativeSelectOption>Alta</NativeSelectOption></NativeSelect></label><label className="form-field">SLA inicial<Input value={form.priority === "Alta" ? "4 horas" : form.priority === "Média" ? "8 horas" : "16 horas"} readOnly /></label></div><div className="sla-note"><Clock3 /><span><strong>O relógio começa após a submissão.</strong> Pausas e devoluções ficam registadas na auditoria.</span></div></div>}
     {step === 4 && <div className="wizard-step"><p className="kicker">PASSO 4 DE 4</p><h2>Confirme e submeta</h2><p>O resumo será gravado no repositório e distribuído aos responsáveis.</p><div className="summary-grid"><div><span>Torre</span><strong>{form.tower}</strong></div><div><span>Transacção</span><strong>{form.type}</strong></div><div className="span-2"><span>Pedido</span><strong>{form.subject || "Novo pedido operacional"}</strong></div><div><span>Fornecedor</span><strong>{form.supplier}</strong></div><div><span>Valor</span><strong>{form.value ? `AOA ${form.value}` : "A confirmar"}</strong></div><div><span>Centro de custo</span><strong>{form.costCenter}</strong></div><div><span>Prioridade</span><strong>{form.priority}</strong></div><div className="span-2"><span>Aprovador</span><strong>{form.approver}</strong></div></div><div className="confirmation-note"><CheckCircle2 /><div><strong>Pronto para iniciar</strong><p>A equipa Muntu receberá o pedido, validará os dados e actualizará o SLA em tempo real.</p></div></div></div>}
@@ -580,6 +583,112 @@ function UsersAdmin() {
   };
 
   return <><PageHeader kicker="GESTÃO DE PLATAFORMA" title="Utilizadores" description="Conceda ou retire permissões — o System Admin é o único nível que pode alterar isto." /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Utilizador</TableHead><TableHead>E-mail</TableHead><TableHead>Empresa</TableHead><TableHead>Nível de acesso</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.companyName ?? "—"}</TableCell><TableCell><NativeSelect value={row.accessLevel} disabled={savingId === row.id} onChange={(event) => changeAccessLevel(row.id, event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem utilizadores</h3></div>}</div></section></>;
+}
+
+type CompanyRow = { id: number; name: string; domain: string; authMethod: string; retainerAmount: number };
+type ClientInvoiceRow = {
+  id: string;
+  companyId: number;
+  companyName: string;
+  periodStart: string;
+  periodEnd: string;
+  scope: "parcial" | "total";
+  status: "pendente_aprovacao" | "aprovada" | "rejeitada" | "enviada_contabilidade";
+  generatedBy: "automatico" | "manual";
+  retainerAmount: number;
+  poAmount: number;
+  invoiceAmount: number;
+  totalAmount: number;
+};
+
+const CLIENT_INVOICE_STATUS_LABELS: Record<ClientInvoiceRow["status"], string> = {
+  pendente_aprovacao: "Pendente de aprovação",
+  aprovada: "Aprovada",
+  rejeitada: "Rejeitada",
+  enviada_contabilidade: "Enviada à contabilidade",
+};
+
+function clientInvoiceStatusClass(status: ClientInvoiceRow["status"]) {
+  if (status === "enviada_contabilidade" || status === "aprovada") return "status status-green";
+  if (status === "rejeitada") return "status status-red";
+  return "status status-amber";
+}
+
+function ClientBilling() {
+  const [companiesList, setCompaniesList] = useState<CompanyRow[]>([]);
+  const [rows, setRows] = useState<ClientInvoiceRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [actingId, setActingId] = useState<string | null>(null);
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = useState({ companyId: "", periodStart: today, periodEnd: today, scope: "total" as "parcial" | "total" });
+
+  const load = async () => {
+    try {
+      const [companiesResponse, billingResponse] = await Promise.all([
+        api<{ companies: CompanyRow[] }>("/api/admin/companies"),
+        api<{ clientInvoices: ClientInvoiceRow[] }>("/api/admin/billing"),
+      ]);
+      setCompaniesList(companiesResponse.companies);
+      setRows(billingResponse.clientInvoices);
+      setForm((current) => ({ ...current, companyId: current.companyId || String(companiesResponse.companies[0]?.id ?? "") }));
+    } catch {
+      toast.error("Não foi possível carregar a facturação");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const generate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!form.companyId) { toast.error("Escolha uma empresa"); return; }
+    setGenerating(true);
+    try {
+      const { clientInvoice } = await api<{ clientInvoice: ClientInvoiceRow }>("/api/admin/billing", {
+        method: "POST",
+        body: JSON.stringify({ companyId: Number(form.companyId), periodStart: form.periodStart, periodEnd: form.periodEnd, scope: form.scope }),
+      });
+      setRows((current) => [clientInvoice, ...current]);
+      toast.success(`${clientInvoice.id} gerada — ${money(clientInvoice.totalAmount)}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível gerar a factura");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const act = async (id: string, action: "approve" | "reject" | "send_to_accounting") => {
+    setActingId(id);
+    try {
+      const { clientInvoice } = await api<{ clientInvoice: ClientInvoiceRow }>(`/api/admin/billing/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action }),
+      });
+      setRows((current) => current.map((row) => (row.id === id ? { ...row, status: clientInvoice.status } : row)));
+      toast.success(`${id}: ${CLIENT_INVOICE_STATUS_LABELS[clientInvoice.status as ClientInvoiceRow["status"]]}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar a factura");
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  return <><PageHeader kicker="COBRANÇA DE ACTIVIDADE" title="Facturação" description="Retainer + POs + facturas do período, por empresa. Geração mensal automática ou sob pedido — sempre validada pelo System Admin antes de seguir para a contabilidade." />
+    <section className="panel">
+      <form onSubmit={generate} className="form-grid">
+        <label className="form-field">Empresa<NativeSelect value={form.companyId} onChange={(event) => setForm((current) => ({ ...current, companyId: event.target.value }))} className="field-control">{companiesList.map((company) => <NativeSelectOption key={company.id} value={company.id}>{company.name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className="form-field">Início do período<Input type="date" value={form.periodStart} onChange={(event) => setForm((current) => ({ ...current, periodStart: event.target.value }))} /></label>
+        <label className="form-field">Fim do período<Input type="date" value={form.periodEnd} onChange={(event) => setForm((current) => ({ ...current, periodEnd: event.target.value }))} /></label>
+        <label className="form-field">Âmbito<NativeSelect value={form.scope} onChange={(event) => setForm((current) => ({ ...current, scope: event.target.value as "parcial" | "total" }))} className="field-control"><NativeSelectOption value="total">Total</NativeSelectOption><NativeSelectOption value="parcial">Parcial</NativeSelectOption></NativeSelect></label>
+        <Button type="submit" className="btn-burgundy" disabled={generating}>{generating ? "A gerar…" : "Gerar factura"} <ArrowRight /></Button>
+      </form>
+    </section>
+    <section className="panel">
+      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Empresa</TableHead><TableHead>Período</TableHead><TableHead>Origem</TableHead><TableHead>Total</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.id}</strong></TableCell><TableCell>{row.companyName}</TableCell><TableCell>{row.periodStart} a {row.periodEnd}</TableCell><TableCell>{row.generatedBy === "automatico" ? "Automática" : "Manual"} • {row.scope === "total" ? "Total" : "Parcial"}</TableCell><TableCell>{money(row.totalAmount)}</TableCell><TableCell><span className={clientInvoiceStatusClass(row.status)}>{CLIENT_INVOICE_STATUS_LABELS[row.status]}</span></TableCell><TableCell className="text-right">{row.status === "pendente_aprovacao" && <><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "approve")} aria-label={`Aprovar ${row.id}`}><Check /></Button><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "reject")} aria-label={`Rejeitar ${row.id}`}><XCircle /></Button></>}{row.status === "aprovada" && <Button size="sm" variant="outline" disabled={actingId === row.id} onClick={() => act(row.id, "send_to_accounting")}>Enviar à contabilidade</Button>}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Landmark /><h3>Sem facturas geradas</h3><p>Use o formulário acima para gerar a primeira.</p></div>}</div>
+    </section>
+  </>;
 }
 
 function RequestDetail({ request, onAction, canDecide }: { request: RequestItem; onAction: (id: string, action: "approve" | "reject") => void; canDecide: boolean }) { return <><SheetHeader><p className="kicker">DOSSIER DA TRANSACÇÃO</p><SheetTitle>{request.id}</SheetTitle><SheetDescription>{request.subject}</SheetDescription></SheetHeader><div className="sheet-body"><div className="sheet-status"><span className={statusClass(request.status)}>{request.status}</span><span className={request.sla.includes("Vencido") ? "text-danger" : ""}><Clock3 /> {request.sla}</span></div><div className="sheet-value"><small>VALOR</small><strong>{money(request.value)}</strong><p>{request.supplier} • {request.costCenter}</p></div><div className="timeline"><h3>Workflow</h3>{stages.map((stage, index) => <div key={stage} className={index < request.stage ? "complete" : index === request.stage ? "current" : ""}><span>{index < request.stage ? <Check /> : index + 1}</span><div><strong>{stage}</strong><small>{index < request.stage ? "Concluído" : index === request.stage ? "Em curso • Muntu Operations" : "A aguardar"}</small></div></div>)}</div><div className="sheet-documents"><h3>Documentos</h3><button><FileText /><span><strong>Requisição e justificativo.pdf</strong><small>Actualizado {request.submitted}</small></span><Download /></button><button><FileText /><span><strong>Proposta do fornecedor.pdf</strong><small>Versão validada</small></span><Download /></button></div><div className="audit-note"><ShieldCheck /><span><strong>Auditoria activa</strong>Todas as decisões, alterações e anexos ficam registados.</span></div></div>{canDecide && request.status === "Aprovação" && <div className="sheet-actions"><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div>}</>; }

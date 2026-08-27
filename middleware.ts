@@ -7,6 +7,9 @@ const PUBLIC_API_PATHS = new Set([
   "/api/auth/company-lookup",
   "/api/auth/sso/start",
   "/api/auth/sso/callback",
+  // Autenticada por CRON_SECRET (header x-cron-secret), não por sessão —
+  // é chamada por um agendador externo, não por um utilizador logado.
+  "/api/admin/billing/generate-monthly",
 ]);
 
 // Bloqueio grosso por prefixo de rota — cobre o essencial da autorização

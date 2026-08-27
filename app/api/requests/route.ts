@@ -57,6 +57,7 @@ export async function POST(request: Request) {
       id,
       subject: payload.subject?.trim() || "Novo pedido operacional",
       tower: payload.tower ?? "Requisition-to-PO",
+      type: payload.type?.trim() || "PO standard",
       value: Number(String(payload.value ?? "").replace(/\D/g, "")) || 0,
       status: "Validação",
       priority: payload.priority ?? "Média",

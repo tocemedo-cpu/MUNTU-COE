@@ -64,6 +64,19 @@ A página **Utilizadores** (`/api/admin/users`) lista todos os utilizadores da p
 
 **Ainda por fazer, fora do âmbito desta alteração:** uma caixa de entrada onde o System Admin responde a pedidos/dúvidas dos utilizadores (hoje não existe nenhum mecanismo de solicitação de suporte).
 
+## Facturação de actividade (cobrança ao cliente)
+
+Modelo de preços do Estudo de Viabilidade §32.4/53.1: **retainer mensal + preço por PO (por tier) + preço por factura (por tier)**, com acesso básico gratuito e serviços avançados (onboarding, integração, analytics, formação) fora desta facturação recorrente.
+
+- **Tiers de PO** (`automatico` | `standard` | `complexo`) — classificados a partir do "Tipo de transacção" do wizard (`lib/billing-tiers.ts`): "Compra urgente" → complexo, "PO catalogado" → automático, resto → standard. Aprovar um pedido gera agora automaticamente a PO ligada (`app/api/requests/[id]/route.ts`), já com o tier certo.
+- **Tiers de factura** (`limpa` | `assistida` | `excecao`) — classificados a partir de `match`/`status`: excepção → excecao, "3-way match" → limpa, resto → assistida.
+- **Preços por unidade** vivem em `billing_rates` (seeded com o ponto médio de cada intervalo do estudo — editável via SQL directo, sem UI de preços ainda).
+- **Retainer** vive em `companies.retainer_amount` (0 por omissão — o estudo não dá um valor indicativo, é "por cliente e escopo"; defina-o por SQL directo: `update companies set retainer_amount = <valor AOA> where domain = '...'`).
+
+Fluxo: `POST /api/admin/billing` (system_admin) gera uma `client_invoice` para uma empresa/período/âmbito (parcial ou total), somando retainer + POs + facturas desse período. Fica em `pendente_aprovacao`. O System Admin aprova ou rejeita (`PATCH /api/admin/billing/:id`); uma factura aprovada pode depois ser marcada como `enviada_contabilidade` — não há integração real com um sistema de contabilidade, é só um estado que sinaliza a entrega (a contabilidade não faz parte desta plataforma).
+
+**Geração mensal automática:** `POST /api/admin/billing/generate-monthly` gera a factura do mês anterior para todas as empresas. Não corre sozinha — precisa de ser chamada por um agendador externo (Render Cron Job, GitHub Actions, cron-job.org, ...) com o header `x-cron-secret: <CRON_SECRET>`. Defina `CRON_SECRET` no Render; sem ele, a rota recusa sempre (nunca fica aberta por omissão).
+
 ## Login: SSO por empresa ou e-mail/password
 
 O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a que empresa pertence o domínio, e só depois decide o fluxo:
@@ -110,6 +123,10 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
 | `/api/documents` | `GET`, `POST` | Repositório documental |
 | `/api/admin/users` | `GET` | Lista todos os utilizadores (só `system_admin`) |
 | `/api/admin/users/:id` | `PATCH` | Muda o nível de acesso/empresa de um utilizador (só `system_admin`) |
+| `/api/admin/companies` | `GET` | Lista as empresas clientes (só `system_admin`) |
+| `/api/admin/billing` | `GET`, `POST` | Lista/gera facturas de cobrança a clientes (só `system_admin`) |
+| `/api/admin/billing/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar/enviar à contabilidade (só `system_admin`) |
+| `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |
 
 Todas as rotas excepto `/api/auth/login` e `/api/auth/logout` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
 
