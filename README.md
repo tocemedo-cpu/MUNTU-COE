@@ -17,7 +17,7 @@ Aplicação full-stack em **Next.js 16** (App Router), com base de dados **Postg
 
 1. Crie um projecto em [supabase.com](https://supabase.com).
 2. Abra **SQL Editor** e cole o conteúdo de `supabase/schema.sql`. Execute — cria as tabelas, os índices, activa RLS com políticas de demonstração e semeia os dados iniciais.
-3. Em **Project Settings → Database → Connection string → URI**, copie a connection string (use a de **Connection pooling**, porta `6543`, para Render/serverless).
+3. Em **Project Settings → Database → Connection string**, abra o separador **Transaction** (pooler/Supavisor, porta `6543`) e copie essa string — **não** a ligação directa (`db.<ref>.supabase.co`). A ligação directa só tem endereço IPv6 e o Render não tem saída IPv6, o que causa `ENETUNREACH` no arranque.
 4. Copie `.env.example` para `.env.local` e cole a connection string em `DATABASE_URL`.
 
 ## Executar localmente
