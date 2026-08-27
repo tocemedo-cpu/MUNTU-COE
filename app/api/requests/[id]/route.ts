@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests } from "@/db/schema";
+import { parseJsonBody, requestActionSchema } from "@/lib/validation";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -13,12 +14,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const db = getDb();
-  const payload = (await request.json()) as { action?: "approve" | "reject" };
+  const parsed = await parseJsonBody(request, requestActionSchema);
+  if (!parsed.success) return parsed.response;
 
   const [existing] = await db.select().from(requests).where(eq(requests.id, id));
   if (!existing) return Response.json({ error: "Pedido não encontrado" }, { status: 404 });
 
-  const approve = payload.action === "approve";
+  const approve = parsed.data.action === "approve";
   const [updated] = await db
     .update(requests)
     .set({

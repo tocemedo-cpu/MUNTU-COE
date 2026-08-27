@@ -1,6 +1,7 @@
 import { like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { suppliers } from "@/db/schema";
+import { parseJsonBody, supplierCreateSchema } from "@/lib/validation";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -16,11 +17,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const db = getDb();
-  const payload = (await request.json()) as { name?: string; category?: string };
-
-  if (!payload.name?.trim()) {
-    return Response.json({ error: "O nome do fornecedor é obrigatório" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, supplierCreateSchema);
+  if (!parsed.success) return parsed.response;
+  const payload = parsed.data;
 
   const [created] = await db
     .insert(suppliers)

@@ -1,6 +1,7 @@
 import { eq, like, or, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests, users } from "@/db/schema";
+import { parseJsonBody, requestCreateSchema } from "@/lib/validation";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -27,15 +28,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const db = getDb();
-  const payload = (await request.json()) as {
-    tower?: string;
-    type?: string;
-    subject?: string;
-    costCenter?: string;
-    supplier?: string;
-    value?: string;
-    priority?: string;
-  };
+  const parsed = await parseJsonBody(request, requestCreateSchema);
+  if (!parsed.success) return parsed.response;
+  const payload = parsed.data;
 
   const userId = Number(request.headers.get("x-muntu-user-id"));
   const [currentUser] = await db.select().from(users).where(eq(users.id, userId));

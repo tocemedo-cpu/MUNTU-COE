@@ -1,6 +1,7 @@
 import { eq, like, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { documents, users } from "@/db/schema";
+import { documentCreateSchema, parseJsonBody } from "@/lib/validation";
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -26,15 +27,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const db = getDb();
-  const payload = (await request.json()) as {
-    name?: string;
-    type?: string;
-    request?: string;
-  };
-
-  if (!payload.name?.trim()) {
-    return Response.json({ error: "O nome do documento é obrigatório" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request, documentCreateSchema);
+  if (!parsed.success) return parsed.response;
+  const payload = parsed.data;
 
   const userId = Number(request.headers.get("x-muntu-user-id"));
   const [currentUser] = await db.select().from(users).where(eq(users.id, userId));
