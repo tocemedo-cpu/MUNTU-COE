@@ -37,16 +37,32 @@ Abra `http://localhost:3000`.
 | --- | --- | --- | --- |
 | Requisitante | `requester` | ana.manuel@operadora.ao | Muntu2026! |
 | Administrador da empresa | `company_admin` | joao.sebastiao@operadora.ao | Muntu2026! |
-| Operações Muntu | `muntu_ops` | marta.miguel@muntucoe.ao | Muntu2026! |
+| COE Manager | `coe_manager` | marta.miguel@muntucoe.ao | Muntu2026! |
+| Analista (Buyer/AP) | `analyst` | sofia.neto@muntucoe.ao | Muntu2026! |
+| System Admin | `system_admin` | rui.domingos@muntucoe.ao | Muntu2026! |
 | Fornecedor | `supplier` | carlos.mateus@kwanzaindustrial.ao | Muntu2026! |
 
 ## Personas e permissões
 
-Do lado do cliente existem duas personas, aplicadas tanto no menu (frontend) como nas rotas de API (`middleware.ts` + `lib/authz.ts` — a autorização real vive no servidor, o frontend só esconde o que o utilizador não pode usar):
+Seis níveis de acesso, aplicados tanto no menu (frontend) como nas rotas de API (`middleware.ts` + `lib/authz.ts` — a autorização real vive no servidor, o frontend só esconde o que o utilizador não pode usar).
 
-- **Requisitante** (`requester`) — limitado ao seu próprio workflow: consultar/criar os seus pedidos e escolher fornecedor no formulário. Sem acesso a aprovações, ordens de compra, recepções, facturas, excepções, pagamentos, relatórios, repositório ou administração — essas rotas devolvem `403` no servidor mesmo que alguém tente chamá-las directamente.
-- **Administrador da empresa** (`company_admin`) — visão abrangente: tudo o que um requisitante vê, mais aprovações, toda a execução P2P e relatórios da sua empresa.
-- **Operações Muntu** (`muntu_ops`) e **Fornecedor** (`supplier`) mantêm o acesso amplo que já tinham — não fazem parte desta reestruturação.
+Lado do cliente:
+
+- **Requisitante** (`requester`) — limitado ao seu próprio workflow: consultar/criar os seus pedidos e escolher fornecedor no formulário. Sem acesso a aprovações, execução P2P, relatórios ou administração — essas rotas devolvem `403` no servidor mesmo que alguém tente chamá-las directamente.
+- **Administrador da empresa** (`company_admin`) — visão abrangente da sua empresa: tudo o que um requisitante vê, mais aprovações, toda a execução P2P e relatórios.
+
+Lado Muntu:
+
+- **Analista — Buyer/AP** (`analyst`) — reporta ao COE Manager, restrito à **execução** do workflow (fornecedores, ordens de compra, recepções, facturas, excepções, pagamentos, repositório). Sem dashboard, sem relatórios, sem administração.
+- **COE Manager** (`coe_manager`) — visão abrangente: dashboard, relatórios, aprovações e toda a execução P2P entre empresas clientes.
+- **System Admin** (`system_admin`) — responsável máximo da plataforma. Único nível com acesso a `/api/admin/**` e à página **Utilizadores**, onde concede/retira o nível de acesso de qualquer utilizador. Vê tudo o que o COE Manager vê.
+- **Fornecedor** (`supplier`) mantém o acesso amplo que já tinha — não faz parte desta reestruturação.
+
+### Gestão de permissões (System Admin)
+
+A página **Utilizadores** (`/api/admin/users`) lista todos os utilizadores da plataforma e permite mudar o nível de acesso de qualquer um por um simples select — chama `PATCH /api/admin/users/:id`. Estas duas rotas só respondem a `system_admin`; qualquer outro nível recebe `403` do `middleware.ts` antes de chegar à rota.
+
+**Ainda por fazer, fora do âmbito desta alteração:** uma caixa de entrada onde o System Admin responde a pedidos/dúvidas dos utilizadores (hoje não existe nenhum mecanismo de solicitação de suporte).
 
 ## Login: SSO por empresa ou e-mail/password
 
@@ -92,6 +108,8 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
 | `/api/payments` | `GET` | Lotes de pagamento |
 | `/api/payments/:id` | `PATCH` | Libertar pagamento |
 | `/api/documents` | `GET`, `POST` | Repositório documental |
+| `/api/admin/users` | `GET` | Lista todos os utilizadores (só `system_admin`) |
+| `/api/admin/users/:id` | `PATCH` | Muda o nível de acesso/empresa de um utilizador (só `system_admin`) |
 
 Todas as rotas excepto `/api/auth/login` e `/api/auth/logout` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
 

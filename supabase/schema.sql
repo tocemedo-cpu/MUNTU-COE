@@ -213,12 +213,16 @@ on conflict (domain) do nothing;
 insert into public.users (name, email, password, role, initials, tenant) values
   ('Ana Manuel', 'ana.manuel@operadora.ao', 'Muntu2026!', 'Requisitante', 'AM', 'Operadora Atlântico, SA'),
   ('João Sebastião', 'joao.sebastiao@operadora.ao', 'Muntu2026!', 'Administrador da empresa', 'JS', 'Operadora Atlântico, SA'),
-  ('Marta Miguel', 'marta.miguel@muntucoe.ao', 'Muntu2026!', 'Operações Muntu', 'MM', 'Operadora Atlântico, SA'),
+  ('Marta Miguel', 'marta.miguel@muntucoe.ao', 'Muntu2026!', 'COE Manager', 'MM', 'Operadora Atlântico, SA'),
+  ('Sofia Neto', 'sofia.neto@muntucoe.ao', 'Muntu2026!', 'Analista (Buyer/AP)', 'SN', 'Operadora Atlântico, SA'),
+  ('Rui Domingos', 'rui.domingos@muntucoe.ao', 'Muntu2026!', 'System Admin', 'RD', 'Operadora Atlântico, SA'),
   ('Carlos Mateus', 'carlos.mateus@kwanzaindustrial.ao', 'Muntu2026!', 'Fornecedor', 'CM', 'Operadora Atlântico, SA')
 on conflict (email) do nothing;
 
 -- Backfill: liga os utilizadores de demonstração à empresa e ao nível de
 -- acesso correcto. Seguro de repetir (define sempre os mesmos valores).
+-- Inclui a renomeação do antigo nível 'muntu_ops' para 'coe_manager',
+-- para quem já tinha corrido uma versão anterior deste script.
 update public.users
 set role = 'Requisitante', access_level = 'requester', company_id = c.id
 from public.companies c
@@ -229,7 +233,10 @@ set role = 'Administrador da empresa', access_level = 'company_admin', company_i
 from public.companies c
 where c.domain = 'operadora.ao' and public.users.email = 'joao.sebastiao@operadora.ao';
 
-update public.users set access_level = 'muntu_ops' where email = 'marta.miguel@muntucoe.ao';
+update public.users set role = 'COE Manager', access_level = 'coe_manager' where email = 'marta.miguel@muntucoe.ao';
+update public.users set access_level = 'coe_manager' where access_level = 'muntu_ops';
+update public.users set access_level = 'analyst' where email = 'sofia.neto@muntucoe.ao';
+update public.users set access_level = 'system_admin' where email = 'rui.domingos@muntucoe.ao';
 update public.users set access_level = 'supplier' where email = 'carlos.mateus@kwanzaindustrial.ao';
 
 insert into public.requests (id, subject, tower, value, status, priority, owner, sla, stage, submitted, supplier, cost_center) values

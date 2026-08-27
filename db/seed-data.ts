@@ -13,7 +13,9 @@ const demoCompany = {
 const demoUsers = [
   { name: "Ana Manuel", email: "ana.manuel@operadora.ao", password: "Muntu2026!", role: "Requisitante", initials: "AM", accessLevel: "requester" as const },
   { name: "João Sebastião", email: "joao.sebastiao@operadora.ao", password: "Muntu2026!", role: "Administrador da empresa", initials: "JS", accessLevel: "company_admin" as const },
-  { name: "Marta Miguel", email: "marta.miguel@muntucoe.ao", password: "Muntu2026!", role: "Operações Muntu", initials: "MM", accessLevel: "muntu_ops" as const },
+  { name: "Marta Miguel", email: "marta.miguel@muntucoe.ao", password: "Muntu2026!", role: "COE Manager", initials: "MM", accessLevel: "coe_manager" as const },
+  { name: "Sofia Neto", email: "sofia.neto@muntucoe.ao", password: "Muntu2026!", role: "Analista (Buyer/AP)", initials: "SN", accessLevel: "analyst" as const },
+  { name: "Rui Domingos", email: "rui.domingos@muntucoe.ao", password: "Muntu2026!", role: "System Admin", initials: "RD", accessLevel: "system_admin" as const },
   { name: "Carlos Mateus", email: "carlos.mateus@kwanzaindustrial.ao", password: "Muntu2026!", role: "Fornecedor", initials: "CM", accessLevel: "supplier" as const },
 ];
 

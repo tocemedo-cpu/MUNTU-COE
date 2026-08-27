@@ -19,7 +19,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["company_admin", "muntu_ops", "supplier"]);
+  const forbidden = forbidUnless(request, ["company_admin", "coe_manager", "system_admin"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;

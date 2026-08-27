@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const forbidden = forbidUnless(request, ["company_admin", "muntu_ops"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
   if (forbidden) return forbidden;
 
   const db = getDb();

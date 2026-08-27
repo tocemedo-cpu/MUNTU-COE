@@ -1,4 +1,4 @@
-export type AccessLevel = "muntu_ops" | "supplier" | "company_admin" | "requester";
+export type AccessLevel = "system_admin" | "coe_manager" | "analyst" | "supplier" | "company_admin" | "requester";
 
 export type SessionPayload = {
   userId: number;

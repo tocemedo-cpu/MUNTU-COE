@@ -42,6 +42,7 @@ import {
   ShoppingCart,
   Sparkles,
   UploadCloud,
+  UserCog,
   Users,
   WalletCards,
   X,
@@ -63,7 +64,7 @@ import { Toaster } from "@/components/ui/sonner";
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
   | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
-  | "reports" | "repository" | "admin";
+  | "reports" | "repository" | "admin" | "users";
 
 type RequestItem = {
   id: string;
@@ -87,7 +88,7 @@ type Invoice = { id: string; supplier: string; po: string; value: number; match:
 type ExceptionItem = { id: string; title: string; ref: string; owner: string; age: string; impact: string; resolved: boolean };
 type PaymentBatch = { id: string; date: string; count: number; value: number; status: string; released: boolean };
 type DocumentItem = { id: number; name: string; type: string; request: string; owner: string; version: string; updated: string };
-type AccessLevel = "muntu_ops" | "supplier" | "company_admin" | "requester";
+type AccessLevel = "system_admin" | "coe_manager" | "analyst" | "supplier" | "company_admin" | "requester";
 type AuthUser = { id: number; name: string; email: string; role: string; initials: string; tenant: string; accessLevel: AccessLevel; companyId: number | null };
 
 const stages = ["Intake", "Validação", "Aprovação", "PO", "Receção", "Factura", "Excepção", "Pagamento"];
@@ -177,7 +178,9 @@ function PublicSite({ onLogin }: { onLogin: () => void }) {
 const roleEmails: Record<string, string> = {
   "Requisitante": "ana.manuel@operadora.ao",
   "Administrador da empresa": "joao.sebastiao@operadora.ao",
-  "Operações Muntu": "marta.miguel@muntucoe.ao",
+  "COE Manager": "marta.miguel@muntucoe.ao",
+  "Analista (Buyer/AP)": "sofia.neto@muntucoe.ao",
+  "System Admin": "rui.domingos@muntucoe.ao",
   "Fornecedor": "carlos.mateus@kwanzaindustrial.ao",
 };
 
@@ -238,7 +241,7 @@ function Login({ onBack, onSuccess, initialError }: { onBack: () => void; onSucc
     <section className="login-visual"><button className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button><Brand inverse /><div className="login-message"><Badge>PORTAL OPERACIONAL</Badge><h1>Todos os pedidos. Todos os intervenientes. Um único fluxo.</h1><p>Acompanhe o trabalho do intake ao pagamento, com SLA, documentação e responsabilidades visíveis.</p><div className="login-stats"><div><strong>96,4%</strong><span>SLA</span></div><div><strong>42</strong><span>pedidos activos</span></div><div><strong>3,2d</strong><span>ciclo médio</span></div></div></div></section>
     <section className="login-panel"><div className="login-card"><div className="mobile-login-brand"><Brand /></div><p className="kicker">BEM-VINDO DE VOLTA</p><h2>Aceda ao Muntu COE</h2><p className="muted">Use um dos perfis de demonstração, ou o e-mail da sua empresa — o portal decide sozinho se é SSO ou palavra-passe.</p>
       {step === "email" && !ssoCompanyName && <form onSubmit={continueWithEmail}>
-        <label>Perfil de demonstração<NativeSelect value={role} onChange={(event) => changeRole(event.target.value)} className="field-control"><NativeSelectOption>Requisitante</NativeSelectOption><NativeSelectOption>Administrador da empresa</NativeSelectOption><NativeSelectOption>Operações Muntu</NativeSelectOption><NativeSelectOption>Fornecedor</NativeSelectOption></NativeSelect></label>
+        <label>Perfil de demonstração<NativeSelect value={role} onChange={(event) => changeRole(event.target.value)} className="field-control"><NativeSelectOption>Requisitante</NativeSelectOption><NativeSelectOption>Administrador da empresa</NativeSelectOption><NativeSelectOption>COE Manager</NativeSelectOption><NativeSelectOption>Analista (Buyer/AP)</NativeSelectOption><NativeSelectOption>System Admin</NativeSelectOption><NativeSelectOption>Fornecedor</NativeSelectOption></NativeSelect></label>
         <label>E-mail corporativo<div className="input-with-icon"><Mail /><Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></label>
         <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={loading}>{loading ? "A verificar…" : "Continuar"} <ArrowRight /></Button>
       </form>}
@@ -258,19 +261,40 @@ function Login({ onBack, onSuccess, initialError }: { onBack: () => void; onSucc
   </main>;
 }
 
-// Um "requester" fica limitado exclusivamente ao seu próprio workflow de
-// pedidos (criar + acompanhar); todos os outros níveis de acesso vêem tudo,
-// como antes. Marcado item a item para ficar explícito na leitura do menu.
-const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number; requesterVisible?: boolean }[] }[] = [
-  { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus, requesterVisible: true }, { id: "requests", label: "Meus pedidos", icon: Inbox, requesterVisible: true }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }] },
+// Quem pode ver cada vista. Um "requester" fica limitado ao seu próprio
+// workflow de pedidos; um "analyst" (buyer/AP) fica limitado à execução
+// P2P (sem dashboard, relatórios ou administração — isso é do COE
+// manager); "company_admin", "coe_manager" e "system_admin" têm visão
+// abrangente. A imposição real está nas rotas de API (middleware.ts +
+// lib/authz.ts) — isto só decide o que aparece no menu.
+const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
+  dashboard: ["company_admin", "coe_manager", "system_admin"],
+  "new-request": ["requester", "company_admin"],
+  requests: ["requester", "company_admin", "coe_manager", "system_admin"],
+  approvals: ["company_admin", "coe_manager", "system_admin"],
+  suppliers: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  pos: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  receipts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  invoices: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  exceptions: ["company_admin", "analyst", "coe_manager", "system_admin"],
+  payments: ["company_admin", "analyst", "coe_manager", "system_admin"],
+  reports: ["company_admin", "coe_manager", "system_admin"],
+  repository: ["company_admin", "analyst", "coe_manager", "system_admin"],
+  admin: ["system_admin"],
+  users: ["system_admin"],
+};
+
+const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
+  { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
-  { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }] },
+  { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
-  const [view, setView] = useState<PortalView>(user.accessLevel === "requester" ? "new-request" : "dashboard");
+  const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
+  const [view, setView] = useState<PortalView>(firstAllowedView);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -423,7 +447,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
 
   return <div className="portal-shell"><Toaster richColors position="top-right" />
     {sidebarOpen && <button className="mobile-overlay" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}
-    <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}><div className="sidebar-brand"><Brand /><button aria-label="Fechar menu" onClick={() => setSidebarOpen(false)}><X /></button></div><div className="tenant"><span>{user.initials.slice(0, 2)}</span><div><strong>{user.tenant}</strong><small>ANGOLA • PRODUÇÃO</small></div></div><nav>{navigation.map((group) => { const items = isRequester ? group.items.filter((item) => item.requesterVisible) : group.items; return items.length ? <div className="nav-group" key={group.group}><p>{group.group}</p>{items.map((item) => { const Icon = item.icon; const count = item.id === "approvals" ? approvalsCount : item.id === "exceptions" ? exceptionsCount : item.id === "requests" ? requests.length : item.id === "invoices" ? invoicesList.filter((invoice) => invoice.status === "Excepção").length : undefined; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => go(item.id)}><Icon /><span>{item.label}</span>{count ? <b>{count}</b> : null}</button>; })}</div> : null; })}</nav><div className="sidebar-help"><ShieldCheck /><div><strong>Centro de controlo</strong><span>Operação acompanhada pelo Muntu COE</span></div></div></aside>
+    <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}><div className="sidebar-brand"><Brand /><button aria-label="Fechar menu" onClick={() => setSidebarOpen(false)}><X /></button></div><div className="tenant"><span>{user.initials.slice(0, 2)}</span><div><strong>{user.tenant}</strong><small>ANGOLA • PRODUÇÃO</small></div></div><nav>{navigation.map((group) => { const items = group.items.filter((item) => VIEW_ROLES[item.id].includes(user.accessLevel)); return items.length ? <div className="nav-group" key={group.group}><p>{group.group}</p>{items.map((item) => { const Icon = item.icon; const count = item.id === "approvals" ? approvalsCount : item.id === "exceptions" ? exceptionsCount : item.id === "requests" ? requests.length : item.id === "invoices" ? invoicesList.filter((invoice) => invoice.status === "Excepção").length : undefined; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => go(item.id)}><Icon /><span>{item.label}</span>{count ? <b>{count}</b> : null}</button>; })}</div> : null; })}</nav><div className="sidebar-help"><ShieldCheck /><div><strong>Centro de controlo</strong><span>Operação acompanhada pelo Muntu COE</span></div></div></aside>
     <section className="portal-main"><header className="topbar"><div className="topbar-left"><button className="menu-button" aria-label="Abrir menu" onClick={() => setSidebarOpen(true)}><Menu /></button><div><small>MUNTU COE / {user.role.toUpperCase()}</small><strong>{viewLabels[view]}</strong></div></div><div className="topbar-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pesquisar pedido, PO, factura ou fornecedor…" /></div><div className="topbar-actions"><Button className="btn-burgundy quick-new" onClick={() => go("new-request")}><Plus /> Novo pedido</Button><div className="notification-wrap"><Button size="icon" variant="outline" aria-label="Notificações" onClick={() => setNotificationsOpen((open) => !open)}><Bell /><span className="notification-dot">3</span></Button>{notificationsOpen && <div className="notification-panel"><div><strong>Notificações</strong><button onClick={() => setNotificationsOpen(false)}><X /></button></div><article><AlertTriangle /><span><b>FT-2026-1192</b> está em excepção há 2 horas.</span></article><article><ClipboardCheck /><span><b>REQ-2026-0814</b> aguarda a sua aprovação.</span></article><article><PackageCheck /><span><b>PO-6100380</b> está pronto para recepção.</span></article></div>}</div><div className="user-menu"><span>{user.initials}</span><div><strong>{user.name}</strong><small>{user.role}</small></div><button aria-label="Terminar sessão" onClick={onLogout}><LogOut /></button></div></div></header>
       <main className="workspace">
         {loading ? <div className="empty-state panel"><Sparkles /><h3>A carregar o portal…</h3><p>A ligar à base de dados do Muntu COE.</p></div> : <>
@@ -440,6 +464,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "reports" && <Reports requests={requests} exceptions={exceptionsList} />}
           {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} />}
           {view === "admin" && <Administration user={user} />}
+          {view === "users" && <UsersAdmin />}
         </>}
       </main>
     </section>
@@ -508,6 +533,54 @@ function Repository({ search, documents, onUpload }: { search: string; documents
 ] as { label: string; Icon: typeof FileText; count: number }[]).map(({ label, Icon, count }, index) => <button className={index === 0 ? "active" : ""} key={label}><Icon /><span>{label}</span><b>{count}</b></button>)}</aside><div className="panel repository-table"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Documento</TableHead><TableHead>Tipo</TableHead><TableHead>Referência</TableHead><TableHead>Responsável</TableHead><TableHead>Versão</TableHead><TableHead>Actualizado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((doc) => <TableRow key={doc.id}><TableCell><div className="doc-name"><FileText /><strong>{doc.name}</strong></div></TableCell><TableCell>{doc.type}</TableCell><TableCell>{doc.request}</TableCell><TableCell>{doc.owner}</TableCell><TableCell>{doc.version}</TableCell><TableCell>{doc.updated}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`${doc.name} pronto para download`)}><Download /></Button></TableCell></TableRow>)}</TableBody></Table></div></div></section></>; }
 
 function Administration({ user }: { user: AuthUser }) { const [settings, setSettings] = useState({ sla: true, escalations: true, supplier: true, payment: false }); const toggle = (key: keyof typeof settings) => setSettings((current) => ({ ...current, [key]: !current[key] })); return <><PageHeader kicker="CONFIGURAÇÃO E GOVERNANCE" title="Administração" description="Organização, utilizadores, matriz de autoridade, SLA, integrações e notificações." /><section className="admin-grid"><article className="panel"><div className="panel-heading"><div><p>ORGANIZAÇÃO</p><h2>{user.tenant}</h2></div><Badge>ANGOLA</Badge></div><div className="admin-fields"><label>Moeda principal<Input value="AOA — Kwanza angolano" readOnly /></label><label>Idioma<Input value="Português (Angola)" readOnly /></label><label>Fuso horário<Input value="Africa/Luanda (UTC+1)" readOnly /></label><label>Regime fiscal<Input value="Angola • IVA 14%" readOnly /></label></div><Button variant="outline" onClick={() => toast.success("Configuração guardada")}>Guardar configuração</Button></article><article className="panel"><div className="panel-heading"><div><p>AUTOMAÇÃO</p><h2>Alertas e controlos</h2></div></div><div className="settings-list"><label><div><strong>Alertas de SLA</strong><span>Notificar antes do vencimento</span></div><Switch checked={settings.sla} onCheckedChange={() => toggle("sla")} /></label><label><div><strong>Escalação automática</strong><span>Escalar itens vencidos ao owner</span></div><Switch checked={settings.escalations} onCheckedChange={() => toggle("escalations")} /></label><label><div><strong>Supplier Passport</strong><span>Bloquear fornecedor com documento crítico expirado</span></div><Switch checked={settings.supplier} onCheckedChange={() => toggle("supplier")} /></label><label><div><strong>Pagamento automático</strong><span>Enviar lote sem aprovação manual</span></div><Switch checked={settings.payment} onCheckedChange={() => toggle("payment")} /></label></div></article><article className="panel integration-panel"><div className="panel-heading"><div><p>INTEGRAÇÕES</p><h2>Sistemas conectados</h2></div></div>{[["ERP Financeiro", "SAP S/4HANA", "Activo"], ["Banco", "Ficheiro ISO 20022", "Activo"], ["Fiscalidade", "AGT / SAF-T", "Configurado"], ["Identidade", "Microsoft Entra ID", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article></section></>; }
+
+const ACCESS_LEVEL_LABELS: Record<AccessLevel, string> = {
+  system_admin: "System Admin",
+  coe_manager: "COE Manager",
+  analyst: "Analista (Buyer/AP)",
+  company_admin: "Administrador da empresa",
+  requester: "Requisitante",
+  supplier: "Fornecedor",
+};
+
+type AdminUserRow = { id: number; name: string; email: string; role: string; accessLevel: AccessLevel; companyId: number | null; companyName: string | null };
+
+function UsersAdmin() {
+  const [rows, setRows] = useState<AdminUserRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { users: list } = await api<{ users: AdminUserRow[] }>("/api/admin/users");
+        setRows(list);
+      } catch {
+        toast.error("Não foi possível carregar os utilizadores");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const changeAccessLevel = async (id: number, accessLevel: AccessLevel) => {
+    setSavingId(id);
+    try {
+      const { user: updated } = await api<{ user: AdminUserRow }>(`/api/admin/users/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ accessLevel }),
+      });
+      setRows((current) => current.map((row) => (row.id === id ? { ...row, accessLevel: updated.accessLevel } : row)));
+      toast.success(`Permissão de ${rows.find((r) => r.id === id)?.name} actualizada`);
+    } catch {
+      toast.error("Não foi possível actualizar a permissão");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return <><PageHeader kicker="GESTÃO DE PLATAFORMA" title="Utilizadores" description="Conceda ou retire permissões — o System Admin é o único nível que pode alterar isto." /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Utilizador</TableHead><TableHead>E-mail</TableHead><TableHead>Empresa</TableHead><TableHead>Nível de acesso</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.companyName ?? "—"}</TableCell><TableCell><NativeSelect value={row.accessLevel} disabled={savingId === row.id} onChange={(event) => changeAccessLevel(row.id, event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem utilizadores</h3></div>}</div></section></>;
+}
 
 function RequestDetail({ request, onAction, canDecide }: { request: RequestItem; onAction: (id: string, action: "approve" | "reject") => void; canDecide: boolean }) { return <><SheetHeader><p className="kicker">DOSSIER DA TRANSACÇÃO</p><SheetTitle>{request.id}</SheetTitle><SheetDescription>{request.subject}</SheetDescription></SheetHeader><div className="sheet-body"><div className="sheet-status"><span className={statusClass(request.status)}>{request.status}</span><span className={request.sla.includes("Vencido") ? "text-danger" : ""}><Clock3 /> {request.sla}</span></div><div className="sheet-value"><small>VALOR</small><strong>{money(request.value)}</strong><p>{request.supplier} • {request.costCenter}</p></div><div className="timeline"><h3>Workflow</h3>{stages.map((stage, index) => <div key={stage} className={index < request.stage ? "complete" : index === request.stage ? "current" : ""}><span>{index < request.stage ? <Check /> : index + 1}</span><div><strong>{stage}</strong><small>{index < request.stage ? "Concluído" : index === request.stage ? "Em curso • Muntu Operations" : "A aguardar"}</small></div></div>)}</div><div className="sheet-documents"><h3>Documentos</h3><button><FileText /><span><strong>Requisição e justificativo.pdf</strong><small>Actualizado {request.submitted}</small></span><Download /></button><button><FileText /><span><strong>Proposta do fornecedor.pdf</strong><small>Versão validada</small></span><Download /></button></div><div className="audit-note"><ShieldCheck /><span><strong>Auditoria activa</strong>Todas as decisões, alterações e anexos ficam registados.</span></div></div>{canDecide && request.status === "Aprovação" && <div className="sheet-actions"><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div>}</>; }
 
