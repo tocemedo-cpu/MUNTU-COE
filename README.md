@@ -104,7 +104,12 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
 
 O botão "Recuperar acesso" (só aparece para contas de e-mail/password — contas SSO não têm password local para repor) chama `POST /api/auth/password-reset/request` com o e-mail. A resposta é sempre `{ ok: true }`, exista ou não uma conta com esse e-mail — nunca revela quais contas existem. Se existir e tiver password local, é gerado um token assinado (30 minutos, mesmo mecanismo HMAC das sessões, com `purpose: "password_reset"` para nunca ser confundido com um cookie de sessão) e enviado por e-mail via [Resend](https://resend.com) com o link `/?reset_token=<token>#login`. Abrir esse link mostra o formulário de nova password; submeter chama `POST /api/auth/password-reset/confirm`.
 
-**Sem `RESEND_API_KEY` definida**, o pedido continua a funcionar exactamente da mesma forma (nunca falha, nunca revela nada) — só que o link fica registado nos logs do servidor (`console.warn`) em vez de ser enviado por e-mail, tal como o SSO só fica totalmente funcional com credenciais reais do IdP. Para activar o envio real: crie uma conta em resend.com, verifique um domínio de envio, e defina `RESEND_API_KEY` (e opcionalmente `RESEND_FROM_EMAIL`).
+**Sem `RESEND_API_KEY` definida**, o pedido continua a funcionar exactamente da mesma forma (nunca falha, nunca revela nada) — só que o link fica registado nos logs do servidor (`console.warn`) em vez de ser enviado por e-mail, tal como o SSO só fica totalmente funcional com credenciais reais do IdP.
+
+Para activar o envio real: crie uma conta em [resend.com](https://resend.com), gere uma API key (Dashboard → API Keys) e defina `RESEND_API_KEY`.
+
+- **Sem domínio verificado (para testar já):** deixe `RESEND_FROM_EMAIL` por definir — usa o remetente de teste partilhado do Resend (`onboarding@resend.dev`), que só entrega ao e-mail da própria conta Resend, mas não exige nenhuma configuração de DNS.
+- **Com domínio próprio (para enviar a destinatários reais):** verifique o domínio em Resend → Domains (adicione os registos DNS pedidos) e defina `RESEND_FROM_EMAIL="Muntu COE <no-reply@o-seu-dominio>"`.
 
 **Limitação conhecida:** o token é reutilizável dentro da janela de 30 minutos (sem registo de "já usado" numa tabela) — mais simples de implementar e testar, ao custo de uma janela pequena onde o mesmo link, se interceptado, podia repor a password mais do que uma vez.
 

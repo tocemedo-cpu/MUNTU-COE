@@ -19,7 +19,12 @@ export async function sendPasswordResetEmail(email: string, resetUrl: string): P
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: process.env.RESEND_FROM_EMAIL || "Muntu COE <no-reply@muntucoe.ao>",
+      // Sem RESEND_FROM_EMAIL definido, usa o remetente de teste partilhado
+      // do Resend — funciona sem verificar domínio nenhum, mas só entrega
+      // ao e-mail da própria conta Resend. Defina RESEND_FROM_EMAIL com um
+      // endereço num domínio verificado (Resend → Domains) para enviar a
+      // destinatários reais.
+      from: process.env.RESEND_FROM_EMAIL || "Muntu COE <onboarding@resend.dev>",
       to: email,
       subject: "Recuperar acesso — Muntu COE",
       html: `<p>Recebemos um pedido para repor a palavra-passe da sua conta Muntu COE.</p><p><a href="${resetUrl}">Definir nova palavra-passe</a></p><p>Este link expira em 30 minutos. Se não foi você a pedir isto, ignore este e-mail — a sua palavra-passe actual continua válida.</p>`,
