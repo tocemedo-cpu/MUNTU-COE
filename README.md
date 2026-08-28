@@ -24,6 +24,8 @@ Aplicação full-stack em **Next.js 16** (App Router), com base de dados **Postg
 
 Requisitos: Node.js ≥ 20.
 
+**Defina `SESSION_SECRET` em `.env.local` antes de arrancar** — sem isto, o login parece funcionar mas a sessão não sobrevive ao pedido seguinte (`npm run dev` usa Turbopack, que pode isolar cada rota de API no seu próprio módulo; o segredo aleatório de fallback deixa de ser garantidamente igual entre rotas — ver comentário em `lib/session.ts`). Gere um valor com `openssl rand -hex 32`.
+
 ```bash
 npm install
 npm run dev

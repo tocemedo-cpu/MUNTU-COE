@@ -20,8 +20,14 @@ function getSecretBytes(): Uint8Array {
     return new TextEncoder().encode(process.env.SESSION_SECRET);
   }
   // Sem SESSION_SECRET definido, gera-se um segredo aleatório por processo.
-  // As sessões continuam a ser válidas e não-adivinháveis, só não sobrevivem
-  // a um reinício/redeploy. Definir SESSION_SECRET evita esse logout global.
+  // Em produção isto sobrevive até ao próximo reinício/redeploy — mas em
+  // `npm run dev` (Turbopack) cada rota de API pode arrancar num módulo
+  // isolado com o seu próprio globalThis, pelo que o segredo "por processo"
+  // não fica necessariamente igual entre rotas: um login pode assinar o
+  // cookie de sessão com um segredo e outra rota falhar a verificá-lo com
+  // outro, invalidando a sessão de imediato. Definir SESSION_SECRET evita
+  // isto por completo (ver README §Executar localmente) — é o único caso
+  // em que esta variável deixa de ser realmente opcional.
   if (!globalThis.__muntuSessionSecret) {
     globalThis.__muntuSessionSecret = crypto.getRandomValues(new Uint8Array(32));
   }
