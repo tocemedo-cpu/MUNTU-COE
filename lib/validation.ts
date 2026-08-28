@@ -68,12 +68,6 @@ export const paymentActionSchema = z.object({
   action: z.literal("release"),
 });
 
-export const documentCreateSchema = z.object({
-  name: z.string().trim().min(1, "O nome do documento é obrigatório").max(300),
-  type: z.string().trim().max(80).optional(),
-  request: z.string().trim().max(80).optional(),
-});
-
 export const userAccessUpdateSchema = z.object({
   accessLevel: z.enum(["system_admin", "coe_manager", "analyst", "supplier", "company_admin", "requester"]),
   companyId: z.number().int().positive().nullable().optional(),

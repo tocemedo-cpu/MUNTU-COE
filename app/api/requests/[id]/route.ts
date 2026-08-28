@@ -48,9 +48,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (approve) {
     const [existingPo] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.requestId, id));
     if (!existingPo) {
-      const poCount = (await db.select().from(purchaseOrders)).length;
-      await db.insert(purchaseOrders).values({
-        id: `PO-${6100400 + poCount}`,
+      await insertPurchaseOrderWithGeneratedId(db, {
         supplier: existing.supplier,
         description: existing.subject,
         value: existing.value,
@@ -64,4 +62,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   return Response.json({ request: updated });
+}
+
+type NewPurchaseOrder = Omit<typeof purchaseOrders.$inferInsert, "id">;
+
+// Um id baseado em COUNT(*) colide assim que a tabela tem qualquer linha
+// fora dessa sequência (dados semeados, POs de outra origem) — e ainda
+// tem uma condição de corrida entre aprovações concorrentes. Em vez
+// disso, sorteia um id no mesmo intervalo visual da tabela de demonstração
+// e volta a tentar no caso (extremamente raro) de colisão real.
+async function insertPurchaseOrderWithGeneratedId(db: ReturnType<typeof getDb>, values: NewPurchaseOrder): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const id = `PO-${6_100_000 + Math.floor(Math.random() * 900_000)}`;
+    try {
+      await db.insert(purchaseOrders).values({ id, ...values });
+      return id;
+    } catch (error) {
+      const isUniqueViolation = (error as { code?: string } | undefined)?.code === "23505";
+      if (!isUniqueViolation || attempt === 4) throw error;
+    }
+  }
+  throw new Error("Não foi possível gerar um id de PO único");
 }

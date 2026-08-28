@@ -166,6 +166,17 @@ create table if not exists public.documents (
   updated text not null
 );
 
+alter table public.documents add column if not exists content_type text;
+alter table public.documents add column if not exists size integer;
+
+-- Ficheiro real associado a um documento — separado de `documents` para
+-- que listar/pesquisar nunca puxe os bytes de todos os ficheiros para
+-- memória; só a rota de download toca esta tabela.
+create table if not exists public.document_files (
+  document_id bigint primary key references public.documents (id),
+  content bytea not null
+);
+
 -- Preço por unidade (Estudo de Viabilidade §32.4/53.1 — modelo híbrido
 -- retainer + PO + factura). Editável via SQL directo por agora.
 create table if not exists public.billing_rates (
@@ -233,6 +244,7 @@ alter table public.invoices enable row level security;
 alter table public.exceptions enable row level security;
 alter table public.payment_batches enable row level security;
 alter table public.documents enable row level security;
+alter table public.document_files enable row level security;
 alter table public.billing_rates enable row level security;
 alter table public.client_invoices enable row level security;
 alter table public.client_invoice_lines enable row level security;
@@ -276,10 +288,11 @@ create policy "public read documents" on public.documents for select using (true
 create policy "public write documents" on public.documents for insert with check (true);
 
 -- Sem política de select em `users`, `companies`, `billing_rates`,
--- `client_invoices` nem `client_invoice_lines`: mantém-nas ilegíveis pela
--- API pública/anon key (segredos de SSO e dados financeiros). Login, SSO
--- e facturação só podem correr a partir de rotas de servidor com a
--- service role key.
+-- `client_invoices`, `client_invoice_lines` nem `document_files`: mantém-nas
+-- ilegíveis pela API pública/anon key (segredos de SSO, dados financeiros e
+-- os bytes reais dos ficheiros carregados). Login, SSO, facturação e
+-- upload/download de documentos só podem correr a partir de rotas de
+-- servidor com a service role key.
 
 -- -----------------------------------------------------------------
 -- Dados de demonstração

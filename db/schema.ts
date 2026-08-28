@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, customType, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 // Empresa cliente (a "tenant" que compra através do portal). O método de
 // login (SSO federado vs. e-mail/password) é decidido por empresa: o login
@@ -189,4 +189,23 @@ export const documents = pgTable("documents", {
   owner: text("owner").notNull(),
   version: text("version").notNull().default("v1"),
   updated: text("updated").notNull(),
+  contentType: text("content_type"),
+  size: integer("size"),
+});
+
+// Ficheiro real associado a um `documents.id` — separado da tabela acima
+// para que listar/pesquisar documentos (`GET /api/documents`) nunca puxe
+// os bytes de todos os ficheiros para memória; só `GET
+// /api/documents/:id/download` toca esta tabela.
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
+
+export const documentFiles = pgTable("document_files", {
+  documentId: bigint("document_id", { mode: "number" })
+    .primaryKey()
+    .references(() => documents.id),
+  content: bytea("content").notNull(),
 });

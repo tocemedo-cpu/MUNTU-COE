@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -431,16 +431,40 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     }
   };
 
-  const uploadDocument = async () => {
+  const uploadDocument = async (file: File) => {
     try {
-      const { document: created } = await api<{ document: DocumentItem }>("/api/documents", {
-        method: "POST",
-        body: JSON.stringify({ name: `Documento_${documentsList.length + 1}.pdf`, type: "Geral", request: "—" }),
-      });
-      setDocumentsList((items) => [created, ...items]);
-      toast.success("Documento adicionado ao repositório");
-    } catch {
-      toast.error("Não foi possível carregar o documento");
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", "Geral");
+      formData.append("request", "—");
+      const response = await fetch("/api/documents", { method: "POST", body: formData });
+      if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Não foi possível carregar o documento");
+      setDocumentsList((items) => [data.document as DocumentItem, ...items]);
+      toast.success(`${file.name} adicionado ao repositório`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível carregar o documento");
+    }
+  };
+
+  const downloadDocument = async (doc: DocumentItem) => {
+    try {
+      const response = await fetch(`/api/documents/${doc.id}/download`);
+      if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Não foi possível descarregar o ficheiro");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = doc.name;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível descarregar o ficheiro");
     }
   };
 
@@ -464,7 +488,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} />}
           {view === "payments" && <Payments batches={paymentBatches} onRelease={releasePayment} />}
           {view === "reports" && <Reports requests={requests} exceptions={exceptionsList} />}
-          {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} />}
+          {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} onDownload={downloadDocument} />}
           {view === "admin" && <Administration user={user} />}
           {view === "users" && <UsersAdmin />}
           {view === "billing" && <ClientBilling />}
@@ -573,14 +597,18 @@ function Reports({ requests, exceptions }: { requests: RequestItem[]; exceptions
   return <><PageHeader kicker="CONTROL TOWER ANALYTICS" title="Relatórios" description="Performance operacional, spend, conteúdo local, risco e oportunidades de melhoria." action={<div className="header-actions"><NativeSelect defaultValue="Agosto 2026"><NativeSelectOption>Agosto 2026</NativeSelectOption><NativeSelectOption>Julho 2026</NativeSelectOption><NativeSelectOption>Q2 2026</NativeSelectOption></NativeSelect><Button variant="outline"><Download /> PDF</Button></div>} /><section className="metric-grid report-metrics"><article><div><small>CICLO REQ-TO-PO</small><strong>2,4d</strong><p><b>−18%</b> vs. baseline</p></div></article><article><div><small>TOUCHLESS INVOICE</small><strong>87%</strong><p><b>+9 pp</b> no trimestre</p></div></article><article><div><small>SPEND LOCAL</small><strong>82%</strong><p>AOA 1,24 mil M</p></div></article><article><div><small>EXCEPÇÕES ABERTAS</small><strong>{openExceptions}</strong><p>Fila activa</p></div></article></section><section className="reports-grid"><article className="panel"><div className="panel-heading"><div><p>TENDÊNCIA</p><h2>Volume e SLA</h2></div><Badge className="badge-positive">Meta atingida</Badge></div><div className="bar-chart">{months.map((item) => <div key={item.month}><span className="bar-value">{item.requests}</span><div className="bar" style={{ height: `${item.requests * 2.4}px` }}><i style={{ height: `${item.sla}%` }} /></div><strong>{item.month}</strong></div>)}</div><div className="chart-legend"><span><i className="legend-burgundy" /> Pedidos</span><span><i className="legend-gold" /> SLA %</span></div></article><article className="panel"><div className="panel-heading"><div><p>DRIVERS</p><h2>Excepções por causa</h2></div></div><div className="cause-list">{[["Recepção em falta", 34], ["Preço divergente", 26], ["Dados fiscais", 18], ["Quantidade", 13], ["Outros", 9]].map(([label, value]) => <div key={label as string}><span>{label}</span><Progress value={value as number} /><strong>{value}%</strong></div>)}</div><div className="insight-box"><Sparkles /><span><strong>Insight Muntu</strong>Confirmar recepções no telemóvel pode eliminar 34% das excepções actuais.</span></div></article></section></>;
 }
 
-function Repository({ search, documents, onUpload }: { search: string; documents: DocumentItem[]; onUpload: () => void }) { const list = documents.filter((doc) => [doc.name, doc.type, doc.request, doc.owner].some((item) => item.toLowerCase().includes(search.toLowerCase()))); return <><PageHeader kicker="FONTE ÚNICA DE VERDADE" title="Repositório" description="Documentos, versões, aprovações e evidência ligados à transacção." action={<Button className="btn-burgundy" onClick={onUpload}><UploadCloud /> Carregar documento</Button>} /><section className="repository-layout"><aside className="folder-list"><p>PASTAS</p>{([
+function Repository({ search, documents, onUpload, onDownload }: { search: string; documents: DocumentItem[]; onUpload: (file: File) => void; onDownload: (doc: DocumentItem) => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const list = documents.filter((doc) => [doc.name, doc.type, doc.request, doc.owner].some((item) => item.toLowerCase().includes(search.toLowerCase())));
+  return <><PageHeader kicker="FONTE ÚNICA DE VERDADE" title="Repositório" description="Documentos, versões, aprovações e evidência ligados à transacção." action={<><input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.target.value = ""; }} /><Button className="btn-burgundy" onClick={() => fileInputRef.current?.click()}><UploadCloud /> Carregar documento</Button></>} /><section className="repository-layout"><aside className="folder-list"><p>PASTAS</p>{([
   { label: "Todos os documentos", Icon: FileText, count: documents.length },
   { label: "Contratos", Icon: BriefcaseBusiness, count: documents.filter((d) => d.type === "Contrato").length },
   { label: "Pedidos e PO", Icon: ShoppingCart, count: documents.filter((d) => d.type === "Pedido").length },
   { label: "Recepções", Icon: PackageCheck, count: documents.filter((d) => d.type === "Receção").length },
   { label: "Facturas", Icon: ReceiptText, count: documents.filter((d) => d.type === "Factura").length },
   { label: "Compliance", Icon: ShieldCheck, count: documents.filter((d) => d.type === "Compliance").length },
-] as { label: string; Icon: typeof FileText; count: number }[]).map(({ label, Icon, count }, index) => <button className={index === 0 ? "active" : ""} key={label}><Icon /><span>{label}</span><b>{count}</b></button>)}</aside><div className="panel repository-table"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Documento</TableHead><TableHead>Tipo</TableHead><TableHead>Referência</TableHead><TableHead>Responsável</TableHead><TableHead>Versão</TableHead><TableHead>Actualizado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((doc) => <TableRow key={doc.id}><TableCell><div className="doc-name"><FileText /><strong>{doc.name}</strong></div></TableCell><TableCell>{doc.type}</TableCell><TableCell>{doc.request}</TableCell><TableCell>{doc.owner}</TableCell><TableCell>{doc.version}</TableCell><TableCell>{doc.updated}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`${doc.name} pronto para download`)}><Download /></Button></TableCell></TableRow>)}</TableBody></Table></div></div></section></>; }
+] as { label: string; Icon: typeof FileText; count: number }[]).map(({ label, Icon, count }, index) => <button className={index === 0 ? "active" : ""} key={label}><Icon /><span>{label}</span><b>{count}</b></button>)}</aside><div className="panel repository-table"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Documento</TableHead><TableHead>Tipo</TableHead><TableHead>Referência</TableHead><TableHead>Responsável</TableHead><TableHead>Versão</TableHead><TableHead>Actualizado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((doc) => <TableRow key={doc.id}><TableCell><div className="doc-name"><FileText /><strong>{doc.name}</strong></div></TableCell><TableCell>{doc.type}</TableCell><TableCell>{doc.request}</TableCell><TableCell>{doc.owner}</TableCell><TableCell>{doc.version}</TableCell><TableCell>{doc.updated}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => onDownload(doc)} aria-label={`Descarregar ${doc.name}`}><Download /></Button></TableCell></TableRow>)}</TableBody></Table></div></div></section></>;
+}
 
 function Administration({ user }: { user: AuthUser }) { const [settings, setSettings] = useState({ sla: true, escalations: true, supplier: true, payment: false }); const toggle = (key: keyof typeof settings) => setSettings((current) => ({ ...current, [key]: !current[key] })); return <><PageHeader kicker="CONFIGURAÇÃO E GOVERNANCE" title="Administração" description="Organização, utilizadores, matriz de autoridade, SLA, integrações e notificações." /><section className="admin-grid"><article className="panel"><div className="panel-heading"><div><p>ORGANIZAÇÃO</p><h2>{user.tenant}</h2></div><Badge>ANGOLA</Badge></div><div className="admin-fields"><label>Moeda principal<Input value="AOA — Kwanza angolano" readOnly /></label><label>Idioma<Input value="Português (Angola)" readOnly /></label><label>Fuso horário<Input value="Africa/Luanda (UTC+1)" readOnly /></label><label>Regime fiscal<Input value="Angola • IVA 14%" readOnly /></label></div><Button variant="outline" onClick={() => toast.success("Configuração guardada")}>Guardar configuração</Button></article><article className="panel"><div className="panel-heading"><div><p>AUTOMAÇÃO</p><h2>Alertas e controlos</h2></div></div><div className="settings-list"><label><div><strong>Alertas de SLA</strong><span>Notificar antes do vencimento</span></div><Switch checked={settings.sla} onCheckedChange={() => toggle("sla")} /></label><label><div><strong>Escalação automática</strong><span>Escalar itens vencidos ao owner</span></div><Switch checked={settings.escalations} onCheckedChange={() => toggle("escalations")} /></label><label><div><strong>Supplier Passport</strong><span>Bloquear fornecedor com documento crítico expirado</span></div><Switch checked={settings.supplier} onCheckedChange={() => toggle("supplier")} /></label><label><div><strong>Pagamento automático</strong><span>Enviar lote sem aprovação manual</span></div><Switch checked={settings.payment} onCheckedChange={() => toggle("payment")} /></label></div></article><article className="panel integration-panel"><div className="panel-heading"><div><p>INTEGRAÇÕES</p><h2>Sistemas conectados</h2></div></div>{[["ERP Financeiro", "SAP S/4HANA", "Activo"], ["Banco", "Ficheiro ISO 20022", "Activo"], ["Fiscalidade", "AGT / SAF-T", "Configurado"], ["Identidade", "Microsoft Entra ID", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article></section></>; }
 

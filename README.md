@@ -123,7 +123,8 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
 | `/api/exceptions/:id` | `PATCH` | Resolver excepção |
 | `/api/payments` | `GET` | Lotes de pagamento |
 | `/api/payments/:id` | `PATCH` | Libertar pagamento |
-| `/api/documents` | `GET`, `POST` | Repositório documental |
+| `/api/documents` | `GET`, `POST` | Repositório documental — `POST` é upload real (`multipart/form-data`, campo `file`, até 15 MB) |
+| `/api/documents/:id/download` | `GET` | Descarrega os bytes reais do ficheiro carregado |
 | `/api/admin/users` | `GET` | Lista todos os utilizadores (só `system_admin`) |
 | `/api/admin/users/:id` | `PATCH` | Muda o nível de acesso/empresa de um utilizador (só `system_admin`) |
 | `/api/admin/companies` | `GET` | Lista as empresas clientes (só `system_admin`) |
@@ -162,6 +163,10 @@ Para gerar migrações versionadas a partir do schema Drizzle:
 npm run db:generate
 ```
 
+### Ficheiros carregados (Repositório)
+
+Os bytes reais de cada documento vivem em `document_files` (coluna `bytea`), separada de `documents` (só metadados) para que listar/pesquisar documentos nunca puxe ficheiros inteiros para memória — só `GET /api/documents/:id/download` toca essa tabela. Limite de 15 MB por ficheiro (`lib/uploads.ts`). Tal como `users`/`billing_rates`, `document_files` não tem política de `select` — ilegível pela API pública/anon key, só por rotas de servidor. Os 4 documentos de demonstração semeados (`db/seed-data.ts`) são só metadados, sem ficheiro real por trás — o download devolve `404` para eles, o que é esperado.
+
 Para (re)semear os dados de demonstração via Drizzle (idempotente — só insere o que faltar):
 
 ```bash
@@ -173,7 +178,7 @@ npm run db:seed
 Dois níveis, separados por design:
 
 - **`npm test`** — testes unitários (`tests/unit/`), sem qualquer base de dados: hashing/verificação de password, classificação de tiers de PO/factura, tokens de sessão (assinatura, adulteração, expiração) e os schemas zod. Correm em menos de um segundo, seguros de correr sempre, inclusive sem Postgres instalado.
-- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, e a UI de admin de tarifas/retainer (`/api/admin/billing-rates`, `/api/admin/companies/:id`). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
+- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, a UI de admin de tarifas/retainer (`/api/admin/billing-rates`, `/api/admin/companies/:id`), e o upload/download real de documentos (round trip completo dos bytes via `bytea`). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
 
 Para correr os testes de integração é preciso um Postgres local (nunca aponte isto para o Supabase de produção):
 
@@ -189,7 +194,7 @@ npm run test:integration
 
 O `?sslmode=disable` é a única forma de desligar o SSL na ligação (`db/index.ts`) — sem esse parâmetro explícito, a app exige sempre SSL, tal como em produção. Os testes recusam-se a correr (erro explícito) se `DATABASE_URL` não tiver `sslmode=disable`, precisamente para nunca correr por engano contra a base de dados real.
 
-Ainda por fazer: workflow de CI (GitHub Actions) a correr isto automaticamente em cada push/PR.
+`.github/workflows/ci.yml` corre tudo isto automaticamente em cada push/PR para `main`: lint + typecheck + build + testes unitários num job, testes de integração contra um serviço Postgres do próprio runner noutro.
 
 ---
 
