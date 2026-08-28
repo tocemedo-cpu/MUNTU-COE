@@ -1,10 +1,13 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { paymentBatches } from "@/db/schema";
-import { getSession } from "@/lib/authz";
+import { forbidUnless, getSession } from "@/lib/authz";
 import { parseJsonBody, paymentActionSchema } from "@/lib/validation";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
+  if (forbidden) return forbidden;
+
   const { id } = await params;
   const db = getDb();
   const parsed = await parseJsonBody(request, paymentActionSchema);
