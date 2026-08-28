@@ -115,6 +115,19 @@ Para activar o envio real: crie uma conta em [resend.com](https://resend.com), g
 
 **Limitação conhecida:** o token é reutilizável dentro da janela de 30 minutos (sem registo de "já usado" numa tabela) — mais simples de implementar e testar, ao custo de uma janela pequena onde o mesmo link, se interceptado, podia repor a password mais do que uma vez.
 
+## Suporte (caixa de entrada de pedidos)
+
+Qualquer utilizador autenticado (independentemente do `accessLevel`) pode abrir um pedido de suporte em **Suporte** na barra lateral — assunto, categoria e mensagem inicial; a prioridade por omissão é `normal`. Cada pedido recebe um ID `SUP-<ano>-####` (gerado aleatoriamente com nova tentativa em caso de colisão, mesmo padrão dos IDs de PO) e um prazo de SLA calculado a partir da prioridade (`lib/support.ts`):
+
+| Prioridade | Janela de SLA |
+| --- | --- |
+| `urgente` | 4 horas |
+| `alta` | 24 horas |
+| `normal` | 72 horas |
+| `baixa` | 120 horas |
+
+Um utilizador normal só vê e responde aos seus próprios pedidos (403 para os de outra pessoa). O `system_admin` vê a caixa de entrada completa — com contagem de abertos e de pedidos com SLA vencido — pode responder a qualquer pedido (uma resposta do admin move automaticamente `aberto` → `em_curso`) e é o único que pode mudar estado, prioridade, categoria ou responsável. Fechar um pedido como `resolvido`/`fechado` regista `resolvedAt`; reabri-lo limpa esse campo. Tal como `users`/`billing_rates`/`document_files`, `support_tickets` e `support_messages` não têm política de `select` — ilegíveis pela API pública/anon key, só por rotas de servidor.
+
 ## Rotas de API
 
 | Rota | Métodos | Descrição |
@@ -151,6 +164,9 @@ Para activar o envio real: crie uma conta em [resend.com](https://resend.com), g
 | `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |
 | `/api/admin/billing-rates` | `GET` | Lista as tarifas de facturação (só `system_admin`) |
 | `/api/admin/billing-rates/:key` | `PATCH` | Actualiza o valor de uma tarifa (só `system_admin`) |
+| `/api/support` | `GET`, `POST` | Pedidos de suporte — `GET` lista os próprios (todos para `system_admin`); `POST` abre um pedido com mensagem inicial |
+| `/api/support/:id` | `GET`, `PATCH` | Detalhe + fio de mensagens (dono ou `system_admin`); `PATCH` muda estado/prioridade/categoria/responsável (só `system_admin`) |
+| `/api/support/:id/messages` | `POST` | Responde num pedido (dono ou `system_admin`) — uma resposta do admin move automaticamente `aberto` → `em_curso` |
 
 Todas as rotas excepto `/api/auth/login` e `/api/auth/logout` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
 

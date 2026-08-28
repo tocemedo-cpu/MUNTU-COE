@@ -209,3 +209,36 @@ export const documentFiles = pgTable("document_files", {
     .references(() => documents.id),
   content: bytea("content").notNull(),
 });
+
+// Caixa de suporte: qualquer utilizador autenticado pode abrir um pedido;
+// só o System Admin vê a caixa de entrada completa e pode categorizar,
+// priorizar, atribuir e responder — ver lib/support.ts para o cálculo do
+// prazo de SLA por prioridade.
+export const supportTickets = pgTable("support_tickets", {
+  id: text("id").primaryKey(), // "SUP-2026-####"
+  subject: text("subject").notNull(),
+  category: text("category").notNull().default("Geral"),
+  priority: text("priority").notNull().default("normal"), // baixa | normal | alta | urgente
+  status: text("status").notNull().default("aberto"), // aberto | em_curso | resolvido | fechado
+  userId: bigint("user_id", { mode: "number" })
+    .notNull()
+    .references(() => users.id),
+  companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
+  assignedToUserId: bigint("assigned_to_user_id", { mode: "number" }).references(() => users.id),
+  slaDueAt: timestamp("sla_due_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
+
+export const supportMessages = pgTable("support_messages", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  ticketId: text("ticket_id")
+    .notNull()
+    .references(() => supportTickets.id),
+  authorUserId: bigint("author_user_id", { mode: "number" })
+    .notNull()
+    .references(() => users.id),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});

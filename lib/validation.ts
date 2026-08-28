@@ -1,4 +1,5 @@
 import { z, type ZodSchema } from "zod";
+import { SUPPORT_CATEGORIES, SUPPORT_PRIORITIES, SUPPORT_STATUSES } from "./support";
 
 export async function parseJsonBody<T>(
   request: Request,
@@ -107,4 +108,23 @@ export const companyUpdateSchema = z.object({
   ssoIssuerUrl: z.string().trim().max(500).optional(),
   ssoClientId: z.string().trim().max(200).optional(),
   ssoClientSecret: z.string().trim().max(500).optional(),
+});
+
+export const supportTicketCreateSchema = z.object({
+  subject: z.string().trim().min(1, "O assunto é obrigatório").max(200),
+  category: z.enum(SUPPORT_CATEGORIES).optional().default("Geral"),
+  priority: z.enum(SUPPORT_PRIORITIES).optional().default("normal"),
+  message: z.string().trim().min(1, "A mensagem é obrigatória").max(4000),
+});
+
+// Actualização parcial (system_admin): só os campos presentes mudam.
+export const supportTicketUpdateSchema = z.object({
+  status: z.enum(SUPPORT_STATUSES).optional(),
+  priority: z.enum(SUPPORT_PRIORITIES).optional(),
+  category: z.enum(SUPPORT_CATEGORIES).optional(),
+  assignedToUserId: z.number().int().positive().nullable().optional(),
+});
+
+export const supportMessageCreateSchema = z.object({
+  body: z.string().trim().min(1, "A mensagem é obrigatória").max(4000),
 });

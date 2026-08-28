@@ -527,6 +527,14 @@ a { color: inherit; text-decoration: none; }
 .sheet-documents button strong { font-size: 9px; }
 .sheet-documents button small { color: #838c91; font-size: 8px; }
 .audit-note { display: flex; gap: 10px; align-items: flex-start; margin-top: 20px; padding: 13px; color: #607067; background: #eaf0ed; border-radius: 7px; }
+.support-thread { display: flex; flex-direction: column; gap: 14px; padding: 20px 0; border-top: 1px solid #e8e2d9; }
+.support-message { padding: 12px 14px; background: #f7f4ee; border-radius: 9px; }
+.support-message-meta { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.support-message-meta strong { font-size: 10px; }
+.support-message-meta small { color: #838c91; font-size: 8px; }
+.support-message p { margin: 0; font-size: 12px; line-height: 1.55; color: #3e464d; white-space: pre-wrap; }
+.support-reply-form { display: flex; flex-direction: column; gap: 10px; padding-top: 16px; border-top: 1px solid #e8e2d9; }
+.support-reply-form button { align-self: flex-end; }
 .audit-note svg { width: 17px; color: var(--green); }
 .audit-note span { display: flex; flex-direction: column; gap: 3px; font-size: 8px; }
 .audit-note strong { font-size: 9px; }

@@ -28,6 +28,7 @@ import {
   KeyRound,
   Landmark,
   LayoutDashboard,
+  LifeBuoy,
   LogOut,
   Mail,
   Menu,
@@ -61,11 +62,12 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
+import { SUPPORT_CATEGORIES, SUPPORT_PRIORITIES, SUPPORT_STATUSES } from "@/lib/support";
 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
   | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
-  | "reports" | "repository" | "admin" | "users" | "billing";
+  | "reports" | "repository" | "admin" | "users" | "billing" | "support";
 
 type RequestItem = {
   id: string;
@@ -342,15 +344,20 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   admin: ["system_admin"],
   users: ["system_admin"],
   billing: ["system_admin"],
+  // Qualquer persona pode abrir um pedido de suporte; só o System Admin
+  // vê a caixa de entrada completa — essa distinção fica dentro do
+  // próprio componente (ver Support/SupportInbox), não no menu.
+  support: ["requester", "company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
 };
 
 const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
   { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
   { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
+  { group: "SUPORTE", items: [{ id: "support", label: "Suporte", icon: LifeBuoy }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -563,6 +570,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "admin" && <Administration user={user} />}
           {view === "users" && <UsersAdmin />}
           {view === "billing" && <ClientBilling />}
+          {view === "support" && <Support user={user} />}
         </>}
       </main>
     </section>
@@ -995,6 +1003,224 @@ function ClientBilling() {
       <div className="panel-heading"><div><p>CONFIGURAÇÃO</p><h2>Retainer por empresa</h2></div></div>
       <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Empresa</TableHead><TableHead>Domínio</TableHead><TableHead>Retainer mensal (AOA)</TableHead></TableRow></TableHeader><TableBody>{companiesList.map((company) => <TableRow key={company.id}><TableCell><strong>{company.name}</strong></TableCell><TableCell>{company.domain}</TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={company.retainerAmount} disabled={savingCompanyId === company.id} onBlur={(event) => { const value = Number(event.target.value); if (value !== company.retainerAmount) saveRetainer(company.id, value); }} className="rate-input" /></TableCell></TableRow>)}</TableBody></Table>{!loading && companiesList.length === 0 && <div className="empty-state"><Landmark /><h3>Sem empresas registadas</h3></div>}</div>
     </section>
+  </>;
+}
+
+type SupportTicketRow = {
+  id: string;
+  subject: string;
+  category: string;
+  priority: "baixa" | "normal" | "alta" | "urgente";
+  status: "aberto" | "em_curso" | "resolvido" | "fechado";
+  userId: number;
+  companyId: number | null;
+  assignedToUserId: number | null;
+  slaDueAt: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+  authorName?: string;
+};
+type SupportMessageRow = { id: number; ticketId: string; body: string; createdAt: string; authorUserId: number; authorName: string | null };
+
+const SUPPORT_STATUS_LABELS: Record<SupportTicketRow["status"], string> = { aberto: "Aberto", em_curso: "Em curso", resolvido: "Resolvido", fechado: "Fechado" };
+function supportStatusClass(status: SupportTicketRow["status"]) {
+  if (status === "resolvido" || status === "fechado") return "status status-green";
+  if (status === "aberto") return "status status-amber";
+  return "status status-slate";
+}
+const SUPPORT_PRIORITY_LABELS: Record<SupportTicketRow["priority"], string> = { baixa: "Baixa", normal: "Normal", alta: "Alta", urgente: "Urgente" };
+function supportPriorityClass(priority: SupportTicketRow["priority"]) {
+  if (priority === "urgente") return "status status-red";
+  if (priority === "alta") return "status status-amber";
+  return "status status-slate";
+}
+function isTicketOverdue(ticket: SupportTicketRow) {
+  return (ticket.status === "aberto" || ticket.status === "em_curso") && new Date(ticket.slaDueAt).getTime() < Date.now();
+}
+function formatSupportDate(value: string) {
+  return new Date(value).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function Support({ user }: { user: AuthUser }) {
+  return user.accessLevel === "system_admin" ? <SupportInbox /> : <MyTickets />;
+}
+
+function NewTicketForm({ onCreated }: { onCreated: (ticket: SupportTicketRow) => void }) {
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [category, setCategory] = useState<string>(SUPPORT_CATEGORIES[0]);
+  const [priority, setPriority] = useState<SupportTicketRow["priority"]>("normal");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { ticket } = await api<{ ticket: SupportTicketRow }>("/api/support", {
+        method: "POST",
+        body: JSON.stringify({ subject, category, priority, message }),
+      });
+      onCreated(ticket);
+      setSubject("");
+      setMessage("");
+      setCategory(SUPPORT_CATEGORIES[0]);
+      setPriority("normal");
+      setOpen(false);
+      toast.success(`${ticket.id} aberto`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível abrir o pedido de suporte");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) return <Button className="btn-burgundy" onClick={() => setOpen(true)}><Plus /> Novo pedido de suporte</Button>;
+
+  return <section className="panel">
+    <form onSubmit={submit} className="form-grid">
+      <label className="form-field span-2">Assunto<Input value={subject} onChange={(event) => setSubject(event.target.value)} required autoFocus /></label>
+      <label className="form-field">Categoria<NativeSelect value={category} onChange={(event) => setCategory(event.target.value)} className="field-control">{SUPPORT_CATEGORIES.map((item) => <NativeSelectOption key={item} value={item}>{item}</NativeSelectOption>)}</NativeSelect></label>
+      <label className="form-field">Prioridade<NativeSelect value={priority} onChange={(event) => setPriority(event.target.value as SupportTicketRow["priority"])} className="field-control">{SUPPORT_PRIORITIES.map((item) => <NativeSelectOption key={item} value={item}>{SUPPORT_PRIORITY_LABELS[item]}</NativeSelectOption>)}</NativeSelect></label>
+      <label className="form-field span-2">Mensagem<Textarea value={message} onChange={(event) => setMessage(event.target.value)} required rows={4} /></label>
+      <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A enviar…" : "Enviar pedido"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button></div>
+    </form>
+  </section>;
+}
+
+function SupportThread({ ticketId, isAdmin, onTicketUpdated }: { ticketId: string; isAdmin: boolean; onTicketUpdated?: (ticket: SupportTicketRow) => void }) {
+  const [ticket, setTicket] = useState<SupportTicketRow | null>(null);
+  const [messages, setMessages] = useState<SupportMessageRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api<{ ticket: SupportTicketRow; messages: SupportMessageRow[] }>(`/api/support/${ticketId}`);
+      setTicket(data.ticket);
+      setMessages(data.messages);
+    } catch {
+      toast.error("Não foi possível carregar o pedido");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [ticketId]);
+
+  const sendReply = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!reply.trim()) return;
+    setSending(true);
+    try {
+      await api(`/api/support/${ticketId}/messages`, { method: "POST", body: JSON.stringify({ body: reply }) });
+      setReply("");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível enviar a resposta");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const updateTicket = async (fields: Partial<Pick<SupportTicketRow, "status" | "priority" | "category">>) => {
+    try {
+      const { ticket: updated } = await api<{ ticket: SupportTicketRow }>(`/api/support/${ticketId}`, { method: "PATCH", body: JSON.stringify(fields) });
+      setTicket(updated);
+      onTicketUpdated?.(updated);
+      toast.success(`${ticketId} actualizado`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar o pedido");
+    }
+  };
+
+  if (loading || !ticket) return <div className="sheet-body"><p className="muted">A carregar…</p></div>;
+
+  return <>
+    <SheetHeader><p className="kicker">PEDIDO DE SUPORTE</p><SheetTitle>{ticket.id}</SheetTitle><SheetDescription>{ticket.subject}</SheetDescription></SheetHeader>
+    <div className="sheet-body">
+      <div className="sheet-status">
+        <span className={supportStatusClass(ticket.status)}>{SUPPORT_STATUS_LABELS[ticket.status]}</span>
+        <span className={isTicketOverdue(ticket) ? "text-danger" : ""}><Clock3 /> {isTicketOverdue(ticket) ? "SLA vencido" : `SLA até ${formatSupportDate(ticket.slaDueAt)}`}</span>
+      </div>
+      {isAdmin && <div className="admin-fields">
+        <label>Estado<NativeSelect value={ticket.status} onChange={(event) => updateTicket({ status: event.target.value as SupportTicketRow["status"] })} className="field-control">{SUPPORT_STATUSES.map((item) => <NativeSelectOption key={item} value={item}>{SUPPORT_STATUS_LABELS[item]}</NativeSelectOption>)}</NativeSelect></label>
+        <label>Prioridade<NativeSelect value={ticket.priority} onChange={(event) => updateTicket({ priority: event.target.value as SupportTicketRow["priority"] })} className="field-control">{SUPPORT_PRIORITIES.map((item) => <NativeSelectOption key={item} value={item}>{SUPPORT_PRIORITY_LABELS[item]}</NativeSelectOption>)}</NativeSelect></label>
+        <label>Categoria<NativeSelect value={ticket.category} onChange={(event) => updateTicket({ category: event.target.value })} className="field-control">{SUPPORT_CATEGORIES.map((item) => <NativeSelectOption key={item} value={item}>{item}</NativeSelectOption>)}</NativeSelect></label>
+      </div>}
+      <div className="support-thread">
+        {messages.map((item) => <div key={item.id} className="support-message"><div className="support-message-meta"><strong>{item.authorName ?? "Utilizador"}</strong><small>{formatSupportDate(item.createdAt)}</small></div><p>{item.body}</p></div>)}
+      </div>
+      <form onSubmit={sendReply} className="support-reply-form">
+        <Textarea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Escreva uma resposta…" rows={3} />
+        <Button type="submit" className="btn-burgundy" disabled={sending || !reply.trim()}>{sending ? "A enviar…" : "Responder"} <ArrowRight /></Button>
+      </form>
+    </div>
+  </>;
+}
+
+function MyTickets() {
+  const [tickets, setTickets] = useState<SupportTicketRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const { tickets: list } = await api<{ tickets: SupportTicketRow[] }>("/api/support");
+      setTickets(list);
+    } catch {
+      toast.error("Não foi possível carregar os seus pedidos de suporte");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  return <><PageHeader kicker="PRECISA DE AJUDA?" title="Suporte" description="Abra um pedido e acompanhe a resposta da equipa Muntu COE." action={<NewTicketForm onCreated={(ticket) => setTickets((current) => [ticket, ...current])} />} />
+    <section className="panel">
+      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Pedido</TableHead><TableHead>Assunto</TableHead><TableHead>Categoria</TableHead><TableHead>Prioridade</TableHead><TableHead>Estado</TableHead><TableHead>Actualizado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{tickets.map((ticket) => <TableRow key={ticket.id}><TableCell><strong>{ticket.id}</strong></TableCell><TableCell>{ticket.subject}</TableCell><TableCell>{ticket.category}</TableCell><TableCell><span className={supportPriorityClass(ticket.priority)}>{SUPPORT_PRIORITY_LABELS[ticket.priority]}</span></TableCell><TableCell><span className={supportStatusClass(ticket.status)}>{SUPPORT_STATUS_LABELS[ticket.status]}</span></TableCell><TableCell>{formatSupportDate(ticket.updatedAt)}</TableCell><TableCell className="text-right"><Button size="icon-sm" variant="ghost" onClick={() => setSelectedId(ticket.id)} aria-label={`Ver ${ticket.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table>{!loading && tickets.length === 0 && <div className="empty-state"><LifeBuoy /><h3>Sem pedidos de suporte</h3><p>Use &quot;Novo pedido de suporte&quot; para falar com a equipa Muntu COE.</p></div>}</div>
+    </section>
+    <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && setSelectedId(null)}><SheetContent className="request-sheet sm:max-w-xl">{selectedId && <SupportThread ticketId={selectedId} isAdmin={false} />}</SheetContent></Sheet>
+  </>;
+}
+
+function SupportInbox() {
+  const [tickets, setTickets] = useState<SupportTicketRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const { tickets: list } = await api<{ tickets: SupportTicketRow[] }>("/api/support");
+      setTickets(list);
+    } catch {
+      toast.error("Não foi possível carregar a caixa de suporte");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const openCount = tickets.filter((t) => t.status === "aberto").length;
+  const overdueCount = tickets.filter(isTicketOverdue).length;
+
+  const applyUpdate = (updated: SupportTicketRow) => setTickets((current) => current.map((t) => (t.id === updated.id ? updated : t)));
+
+  return <><PageHeader kicker="CAIXA DE ENTRADA" title="Suporte" description="Pedidos e dúvidas de todos os utilizadores do Muntu COE." />
+    <section className="metric-grid report-metrics">
+      <article><div><small>ABERTOS</small><strong>{openCount}</strong></div></article>
+      <article><div><small>SLA VENCIDO</small><strong className={overdueCount > 0 ? "text-danger" : ""}>{overdueCount}</strong></div></article>
+      <article><div><small>TOTAL</small><strong>{tickets.length}</strong></div></article>
+    </section>
+    <section className="panel">
+      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Pedido</TableHead><TableHead>Assunto</TableHead><TableHead>Categoria</TableHead><TableHead>Prioridade</TableHead><TableHead>Estado</TableHead><TableHead>SLA</TableHead><TableHead /></TableRow></TableHeader><TableBody>{tickets.map((ticket) => <TableRow key={ticket.id}><TableCell><strong>{ticket.id}</strong></TableCell><TableCell>{ticket.subject}</TableCell><TableCell>{ticket.category}</TableCell><TableCell><span className={supportPriorityClass(ticket.priority)}>{SUPPORT_PRIORITY_LABELS[ticket.priority]}</span></TableCell><TableCell><span className={supportStatusClass(ticket.status)}>{SUPPORT_STATUS_LABELS[ticket.status]}</span></TableCell><TableCell><span className={isTicketOverdue(ticket) ? "text-danger" : ""}>{isTicketOverdue(ticket) ? "Vencido" : formatSupportDate(ticket.slaDueAt)}</span></TableCell><TableCell className="text-right"><Button size="icon-sm" variant="ghost" onClick={() => setSelectedId(ticket.id)} aria-label={`Ver ${ticket.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table>{!loading && tickets.length === 0 && <div className="empty-state"><LifeBuoy /><h3>Sem pedidos de suporte</h3><p>Nada pendente por agora.</p></div>}</div>
+    </section>
+    <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && setSelectedId(null)}><SheetContent className="request-sheet sm:max-w-xl">{selectedId && <SupportThread ticketId={selectedId} isAdmin onTicketUpdated={applyUpdate} />}</SheetContent></Sheet>
   </>;
 }
 

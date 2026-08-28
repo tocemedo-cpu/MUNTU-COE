@@ -177,6 +177,32 @@ create table if not exists public.document_files (
   content bytea not null
 );
 
+-- Caixa de suporte: qualquer utilizador autenticado pode abrir um pedido;
+-- só o System Admin vê a caixa de entrada completa. Ver lib/support.ts
+-- para o cálculo do prazo de SLA por prioridade.
+create table if not exists public.support_tickets (
+  id text primary key, -- "SUP-2026-####"
+  subject text not null,
+  category text not null default 'Geral',
+  priority text not null default 'normal', -- baixa | normal | alta | urgente
+  status text not null default 'aberto', -- aberto | em_curso | resolvido | fechado
+  user_id bigint not null references public.users (id),
+  company_id bigint references public.companies (id),
+  assigned_to_user_id bigint references public.users (id),
+  sla_due_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+
+create table if not exists public.support_messages (
+  id bigint generated always as identity primary key,
+  ticket_id text not null references public.support_tickets (id),
+  author_user_id bigint not null references public.users (id),
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
 -- Preço por unidade (Estudo de Viabilidade §32.4/53.1 — modelo híbrido
 -- retainer + PO + factura). Editável via SQL directo por agora.
 create table if not exists public.billing_rates (
@@ -248,6 +274,8 @@ alter table public.document_files enable row level security;
 alter table public.billing_rates enable row level security;
 alter table public.client_invoices enable row level security;
 alter table public.client_invoice_lines enable row level security;
+alter table public.support_tickets enable row level security;
+alter table public.support_messages enable row level security;
 
 drop policy if exists "public read requests" on public.requests;
 drop policy if exists "public write requests" on public.requests;
@@ -288,11 +316,13 @@ create policy "public read documents" on public.documents for select using (true
 create policy "public write documents" on public.documents for insert with check (true);
 
 -- Sem política de select em `users`, `companies`, `billing_rates`,
--- `client_invoices`, `client_invoice_lines` nem `document_files`: mantém-nas
--- ilegíveis pela API pública/anon key (segredos de SSO, dados financeiros e
--- os bytes reais dos ficheiros carregados). Login, SSO, facturação e
--- upload/download de documentos só podem correr a partir de rotas de
--- servidor com a service role key.
+-- `client_invoices`, `client_invoice_lines`, `document_files`,
+-- `support_tickets` nem `support_messages`: mantém-nas ilegíveis pela API
+-- pública/anon key (segredos de SSO, dados financeiros, bytes reais dos
+-- ficheiros carregados e conteúdo de pedidos de suporte dos utilizadores).
+-- Login, SSO, facturação, upload/download de documentos e a caixa de
+-- suporte só podem correr a partir de rotas de servidor com a service
+-- role key.
 
 -- -----------------------------------------------------------------
 -- Dados de demonstração
