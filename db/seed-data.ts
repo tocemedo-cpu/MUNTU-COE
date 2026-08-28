@@ -101,8 +101,12 @@ export async function seedIfEmpty(db: Db) {
     await db.insert(schema.users).values(usersToInsert).onConflictDoNothing();
   }
 
-  const existingRequests = await db.select().from(schema.requests).limit(1);
-  if (existingRequests.length === 0) {
+  // Verifica um id de pedido de demonstração concreto, não só "a tabela
+  // tem alguma linha" — outro código (ex.: testes de integração) também
+  // insere em `requests` com ids próprios, o que faria este portão dar
+  // um falso positivo e saltar a semeadura do resto do dataset de demo.
+  const existingDemoRequest = await db.select().from(schema.requests).where(eq(schema.requests.id, demoRequests[0].id));
+  if (existingDemoRequest.length === 0) {
     const anaManuel = (await db.select().from(schema.users).where(eq(schema.users.email, "ana.manuel@operadora.ao")))[0];
 
     await db
