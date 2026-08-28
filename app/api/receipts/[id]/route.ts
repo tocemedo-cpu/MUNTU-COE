@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { receipts } from "@/db/schema";
+import { getSession } from "@/lib/authz";
 import { parseJsonBody, receiptActionSchema } from "@/lib/validation";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -11,6 +12,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const [existing] = await db.select().from(receipts).where(eq(receipts.id, Number(id)));
   if (!existing) return Response.json({ error: "Recepção não encontrada" }, { status: 404 });
+
+  const session = getSession(request);
+  if (session.accessLevel === "company_admin" && existing.companyId !== session.companyId) {
+    return Response.json({ error: "Sem permissão para aceder a este recurso." }, { status: 403 });
+  }
 
   const [updated] = await db
     .update(receipts)

@@ -109,6 +109,9 @@ create table if not exists public.receipts (
 );
 
 alter table public.receipts add column if not exists supplier_id bigint references public.suppliers (id);
+-- Sem esta coluna, `company_admin` via a API via um filtro por empresa
+-- inexistente e recebia recepções de todas as empresas — ver app/api/receipts.
+alter table public.receipts add column if not exists company_id bigint references public.companies (id);
 
 create table if not exists public.invoices (
   id text primary key,
@@ -136,6 +139,10 @@ create table if not exists public.exceptions (
   resolved boolean not null default false
 );
 
+-- Mesma razão que em receipts: sem isto, `company_admin` recebia excepções
+-- de todas as empresas via a API.
+alter table public.exceptions add column if not exists company_id bigint references public.companies (id);
+
 create table if not exists public.payment_batches (
   id text primary key,
   date text not null,
@@ -144,6 +151,10 @@ create table if not exists public.payment_batches (
   status text not null default 'Pronto',
   released boolean not null default false
 );
+
+-- Mesma razão que em receipts/exceptions: sem isto, company_admin recebia
+-- lotes de pagamento de todas as empresas via a API.
+alter table public.payment_batches add column if not exists company_id bigint references public.companies (id);
 
 create table if not exists public.documents (
   id bigint generated always as identity primary key,
@@ -307,6 +318,18 @@ update public.users set access_level = 'analyst' where email = 'sofia.neto@muntu
 update public.users set access_level = 'system_admin' where email = 'rui.domingos@muntucoe.ao';
 update public.users set access_level = 'supplier' where email = 'carlos.mateus@kwanzaindustrial.ao';
 
+-- Migração de segurança: as senhas de demonstração acima ficam em texto
+-- simples nesta instrução INSERT só para serem legíveis aqui. Esta
+-- actualização troca-as (e quaisquer outras ainda em texto simples,
+-- p.ex. de uma instalação anterior a esta alteração) por um hash bcrypt,
+-- compatível com bcryptjs (ver lib/password.ts). Idempotente: linhas já
+-- em formato bcrypt ($2a$/$2b$/$2y$) são ignoradas.
+create extension if not exists pgcrypto;
+
+update public.users
+set password = crypt(password, gen_salt('bf', 10))
+where password is not null and password !~ '^\$2[aby]\$';
+
 insert into public.requests (id, subject, tower, type, value, status, priority, owner, sla, stage, submitted, supplier, cost_center) values
   ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 'PO standard', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210'),
   ('REQ-2026-0813', 'Inspecção NDT offshore', 'Serviços técnicos', 'Compra urgente', 31600000, 'Em execução', 'Alta', 'Marta Miguel', '18h 40m', 3, '25 Ago, 15:42', 'Atlântico Integrity', 'INT-B15-105'),
@@ -376,6 +399,24 @@ where c.domain = 'operadora.ao';
 update public.purchase_orders po set supplier_id = s.id from public.suppliers s where s.name = po.supplier;
 update public.receipts r set supplier_id = s.id from public.suppliers s where s.name = r.supplier;
 update public.invoices i set supplier_id = s.id from public.suppliers s where s.name = i.supplier;
+
+-- Backfill: liga recepções e excepções de demonstração à empresa
+-- (fecha a lacuna em que company_admin via dados de todas as empresas
+-- por estas duas tabelas não terem company_id até agora).
+update public.receipts r
+set company_id = c.id
+from public.companies c
+where c.domain = 'operadora.ao' and r.company_id is null;
+
+update public.exceptions e
+set company_id = c.id
+from public.companies c
+where c.domain = 'operadora.ao' and e.company_id is null;
+
+update public.payment_batches pb
+set company_id = c.id
+from public.companies c
+where c.domain = 'operadora.ao' and pb.company_id is null;
 
 update public.users
 set supplier_id = s.id

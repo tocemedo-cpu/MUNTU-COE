@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { createSessionToken, SESSION_COOKIE_NAME, SESSION_TTL_SECONDS, type AccessLevel } from "@/lib/session";
+import { verifyPassword } from "@/lib/password";
 import { loginSchema, parseJsonBody } from "@/lib/validation";
 
 export async function POST(request: Request) {
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
 
   const [user] = await db.select().from(users).where(eq(users.email, email));
 
-  if (!user || !user.password || user.password !== parsed.data.password) {
+  if (!user || !user.password || !(await verifyPassword(parsed.data.password, user.password))) {
     return Response.json({ error: "Credenciais inválidas" }, { status: 401 });
   }
 

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { classifyInvoiceTier } from "../lib/billing-tiers";
+import { hashPassword } from "../lib/password";
 import * as schema from "./schema";
 
 type Db = PostgresJsDatabase<typeof schema>;
@@ -89,16 +90,15 @@ export async function seedIfEmpty(db: Db) {
 
   const existingUsers = await db.select().from(schema.users).limit(1);
   if (existingUsers.length === 0) {
-    await db
-      .insert(schema.users)
-      .values(
-        demoUsers.map((user) => ({
-          ...user,
-          companyId: user.accessLevel === "company_admin" || user.accessLevel === "requester" ? company.id : null,
-          supplierId: user.accessLevel === "supplier" ? (supplierIdByName.get("Kwanza Industrial") ?? null) : null,
-        }))
-      )
-      .onConflictDoNothing();
+    const usersToInsert = await Promise.all(
+      demoUsers.map(async (user) => ({
+        ...user,
+        password: await hashPassword(user.password),
+        companyId: user.accessLevel === "company_admin" || user.accessLevel === "requester" ? company.id : null,
+        supplierId: user.accessLevel === "supplier" ? (supplierIdByName.get("Kwanza Industrial") ?? null) : null,
+      }))
+    );
+    await db.insert(schema.users).values(usersToInsert).onConflictDoNothing();
   }
 
   const existingRequests = await db.select().from(schema.requests).limit(1);
@@ -121,7 +121,13 @@ export async function seedIfEmpty(db: Db) {
       .onConflictDoNothing();
     await db
       .insert(schema.receipts)
-      .values(demoReceipts.map((receipt) => ({ ...receipt, supplierId: supplierIdByName.get(receipt.supplier) ?? null })));
+      .values(
+        demoReceipts.map((receipt) => ({
+          ...receipt,
+          companyId: company.id,
+          supplierId: supplierIdByName.get(receipt.supplier) ?? null,
+        }))
+      );
     await db
       .insert(schema.invoices)
       .values(
@@ -133,8 +139,14 @@ export async function seedIfEmpty(db: Db) {
         }))
       )
       .onConflictDoNothing();
-    await db.insert(schema.exceptions).values(demoExceptions).onConflictDoNothing();
-    await db.insert(schema.paymentBatches).values(demoPaymentBatches).onConflictDoNothing();
+    await db
+      .insert(schema.exceptions)
+      .values(demoExceptions.map((exception) => ({ ...exception, companyId: company.id })))
+      .onConflictDoNothing();
+    await db
+      .insert(schema.paymentBatches)
+      .values(demoPaymentBatches.map((batch) => ({ ...batch, companyId: company.id })))
+      .onConflictDoNothing();
     await db.insert(schema.documents).values(demoDocuments);
   }
 

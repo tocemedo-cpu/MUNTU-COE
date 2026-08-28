@@ -95,6 +95,7 @@ export const receipts = pgTable("receipts", {
   description: text("description").notNull(),
   supplier: text("supplier").notNull(),
   supplierId: bigint("supplier_id", { mode: "number" }).references(() => suppliers.id),
+  companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
   value: bigint("value", { mode: "number" }).notNull().default(0),
   progress: integer("progress").notNull().default(0),
   status: text("status").notNull().default("Em curso"),
@@ -123,6 +124,7 @@ export const exceptions = pgTable("exceptions", {
   age: text("age").notNull(),
   impact: text("impact").notNull(),
   resolved: boolean("resolved").notNull().default(false),
+  companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
 });
 
 export const paymentBatches = pgTable("payment_batches", {
@@ -132,6 +134,7 @@ export const paymentBatches = pgTable("payment_batches", {
   value: bigint("value", { mode: "number" }).notNull().default(0),
   status: text("status").notNull().default("Pronto"),
   released: boolean("released").notNull().default(false),
+  companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
 });
 
 // Tabelas de preço por unidade (Estudo de Viabilidade §32.4/53.1 —

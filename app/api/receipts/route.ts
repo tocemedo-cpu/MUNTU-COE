@@ -13,6 +13,10 @@ export async function GET(request: Request) {
     return Response.json({ receipts: rows });
   }
 
-  const rows = await db.select().from(receipts);
+  const rows =
+    session.accessLevel === "company_admin" && session.companyId != null
+      ? await db.select().from(receipts).where(eq(receipts.companyId, session.companyId))
+      : await db.select().from(receipts);
+
   return Response.json({ receipts: rows });
 }
