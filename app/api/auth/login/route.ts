@@ -1,8 +1,7 @@
-import { cookies } from "next/headers";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
-import { createSessionToken, SESSION_COOKIE_NAME, SESSION_TTL_SECONDS, type AccessLevel } from "@/lib/session";
+import { createSessionToken, sessionCookieHeader, type AccessLevel } from "@/lib/session";
 import { verifyPassword } from "@/lib/password";
 import { loginSchema, parseJsonBody } from "@/lib/validation";
 
@@ -24,15 +23,6 @@ export async function POST(request: Request) {
     companyId: user.companyId,
     supplierId: user.supplierId,
   });
-  const store = await cookies();
-  store.set(SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_TTL_SECONDS,
-  });
-
   const { password: _password, ...safeUser } = user;
-  return Response.json({ user: safeUser });
+  return Response.json({ user: safeUser }, { headers: { "Set-Cookie": sessionCookieHeader(token) } });
 }

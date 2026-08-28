@@ -99,4 +99,18 @@ export async function verifySessionToken(token: string | undefined | null): Prom
   return payload;
 }
 
+/** Cabeçalho Set-Cookie para a sessão — construído directamente em vez de
+ * usar `cookies()` de "next/headers", para que as rotas de login/logout
+ * sejam funções Request→Response simples, testáveis sem um pedido Next.js
+ * a decorrer (ver tests/integration/auth.test.ts). */
+export function sessionCookieHeader(token: string): string {
+  const attrs = [`${SESSION_COOKIE_NAME}=${token}`, "Path=/", `Max-Age=${SESSION_TTL_SECONDS}`, "HttpOnly", "SameSite=Lax"];
+  if (process.env.NODE_ENV === "production") attrs.push("Secure");
+  return attrs.join("; ");
+}
+
+export function clearSessionCookieHeader(): string {
+  return `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`;
+}
+
 export { SESSION_COOKIE_NAME, SESSION_TTL_SECONDS };

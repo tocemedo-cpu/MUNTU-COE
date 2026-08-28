@@ -165,6 +165,29 @@ Para (re)semear os dados de demonstração via Drizzle (idempotente — só inse
 npm run db:seed
 ```
 
+## Testes
+
+Dois níveis, separados por design:
+
+- **`npm test`** — testes unitários (`tests/unit/`), sem qualquer base de dados: hashing/verificação de password, classificação de tiers de PO/factura, tokens de sessão (assinatura, adulteração, expiração) e os schemas zod. Correm em menos de um segundo, seguros de correr sempre, inclusive sem Postgres instalado.
+- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), e o escopo por empresa de `receipts`/`exceptions`/`payments`. Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
+
+Para correr os testes de integração é preciso um Postgres local (nunca aponte isto para o Supabase de produção):
+
+```bash
+sudo apt-get install -y postgresql postgresql-contrib   # ou o equivalente no seu SO
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+sudo -u postgres psql -c "CREATE DATABASE muntu_test OWNER postgres;"
+
+DATABASE_URL="postgres://postgres:postgres@127.0.0.1:5432/muntu_test?sslmode=disable" npx drizzle-kit push --force
+
+npm run test:integration
+```
+
+O `?sslmode=disable` é a única forma de desligar o SSL na ligação (`db/index.ts`) — sem esse parâmetro explícito, a app exige sempre SSL, tal como em produção. Os testes recusam-se a correr (erro explícito) se `DATABASE_URL` não tiver `sslmode=disable`, precisamente para nunca correr por engano contra a base de dados real.
+
+Ainda por fazer: workflow de CI (GitHub Actions) a correr isto automaticamente em cada push/PR.
+
 ---
 
 © 2026 Muntu COE — Luanda, Angola.

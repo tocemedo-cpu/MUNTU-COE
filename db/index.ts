@@ -38,9 +38,15 @@ declare global {
   var __muntuPg: ReturnType<typeof postgres> | undefined;
 }
 
+// Produção (Supabase) exige sempre SSL. A única forma de o desligar é o
+// próprio DATABASE_URL pedir `sslmode=disable` explicitamente — usado só
+// por uma base de dados Postgres local para testes de integração (ver
+// tests/integration), nunca em produção.
+const sslMode = parsedUrl.searchParams.get("sslmode") === "disable" ? false : "require";
+
 let client: ReturnType<typeof postgres>;
 try {
-  client = globalThis.__muntuPg ?? postgres(connectionString, { prepare: false, ssl: "require" });
+  client = globalThis.__muntuPg ?? postgres(connectionString, { prepare: false, ssl: sslMode });
 } catch (error) {
   throw new Error(
     `Falha ao inicializar o cliente Postgres a partir de DATABASE_URL: ${error instanceof Error ? error.message : String(error)}`

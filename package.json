@@ -11,7 +11,9 @@
     "start": "next start -p ${PORT:-3000}",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate",
-    "db:seed": "tsx db/seed.ts"
+    "db:seed": "tsx db/seed.ts",
+    "test": "vitest run",
+    "test:integration": "DATABASE_URL=\"postgres://postgres:postgres@127.0.0.1:5432/muntu_test?sslmode=disable\" vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -53,7 +55,8 @@
     "tailwindcss": "4.2.1",
     "tsx": "^4.19.2",
     "tw-animate-css": "^1.4.0",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "^4.1.11"
   },
   "type": "module",
   "displayName": "Muntu COE — One-stop-shop P2P"
