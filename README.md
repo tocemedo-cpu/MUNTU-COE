@@ -72,8 +72,8 @@ Modelo de preços do Estudo de Viabilidade §32.4/53.1: **retainer mensal + pre�
 
 - **Tiers de PO** (`automatico` | `standard` | `complexo`) — classificados a partir do "Tipo de transacção" do wizard (`lib/billing-tiers.ts`): "Compra urgente" → complexo, "PO catalogado" → automático, resto → standard. Aprovar um pedido gera agora automaticamente a PO ligada (`app/api/requests/[id]/route.ts`), já com o tier certo.
 - **Tiers de factura** (`limpa` | `assistida` | `excecao`) — classificados a partir de `match`/`status`: excepção → excecao, "3-way match" → limpa, resto → assistida.
-- **Preços por unidade** vivem em `billing_rates` (seeded com o ponto médio de cada intervalo do estudo — editável via SQL directo, sem UI de preços ainda).
-- **Retainer** vive em `companies.retainer_amount` (0 por omissão — o estudo não dá um valor indicativo, é "por cliente e escopo"; defina-o por SQL directo: `update companies set retainer_amount = <valor AOA> where domain = '...'`).
+- **Preços por unidade** vivem em `billing_rates` (seeded com o ponto médio de cada intervalo do estudo). Editáveis na própria página **Facturação** (painel "Tarifas por unidade", `system_admin`) via `PATCH /api/admin/billing-rates/:key`, ou por SQL directo se preferir.
+- **Retainer** vive em `companies.retainer_amount` (0 por omissão — o estudo não dá um valor indicativo, é "por cliente e escopo"). Editável na página **Facturação** (painel "Retainer por empresa") via `PATCH /api/admin/companies/:id`, ou por SQL directo: `update companies set retainer_amount = <valor AOA> where domain = '...'`.
 
 Fluxo: `POST /api/admin/billing` (system_admin) gera uma `client_invoice` para uma empresa/período/âmbito (parcial ou total), somando retainer + POs + facturas desse período. Fica em `pendente_aprovacao`. O System Admin aprova ou rejeita (`PATCH /api/admin/billing/:id`); uma factura aprovada pode depois ser marcada como `enviada_contabilidade` — não há integração real com um sistema de contabilidade, é só um estado que sinaliza a entrega (a contabilidade não faz parte desta plataforma).
 
@@ -127,9 +127,12 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
 | `/api/admin/users` | `GET` | Lista todos os utilizadores (só `system_admin`) |
 | `/api/admin/users/:id` | `PATCH` | Muda o nível de acesso/empresa de um utilizador (só `system_admin`) |
 | `/api/admin/companies` | `GET` | Lista as empresas clientes (só `system_admin`) |
+| `/api/admin/companies/:id` | `PATCH` | Actualiza o retainer mensal de uma empresa (só `system_admin`) |
 | `/api/admin/billing` | `GET`, `POST` | Lista/gera facturas de cobrança a clientes (só `system_admin`) |
 | `/api/admin/billing/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar/enviar à contabilidade (só `system_admin`) |
 | `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |
+| `/api/admin/billing-rates` | `GET` | Lista as tarifas de facturação (só `system_admin`) |
+| `/api/admin/billing-rates/:key` | `PATCH` | Actualiza o valor de uma tarifa (só `system_admin`) |
 
 Todas as rotas excepto `/api/auth/login` e `/api/auth/logout` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
 
@@ -170,7 +173,7 @@ npm run db:seed
 Dois níveis, separados por design:
 
 - **`npm test`** — testes unitários (`tests/unit/`), sem qualquer base de dados: hashing/verificação de password, classificação de tiers de PO/factura, tokens de sessão (assinatura, adulteração, expiração) e os schemas zod. Correm em menos de um segundo, seguros de correr sempre, inclusive sem Postgres instalado.
-- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), e o escopo por empresa de `receipts`/`exceptions`/`payments`. Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
+- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, e a UI de admin de tarifas/retainer (`/api/admin/billing-rates`, `/api/admin/companies/:id`). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
 
 Para correr os testes de integração é preciso um Postgres local (nunca aponte isto para o Supabase de produção):
 

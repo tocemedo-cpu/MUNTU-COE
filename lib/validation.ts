@@ -90,3 +90,11 @@ export const clientInvoiceGenerateSchema = z.object({
 export const clientInvoiceActionSchema = z.object({
   action: z.enum(["approve", "reject", "send_to_accounting"]),
 });
+
+export const billingRateUpdateSchema = z.object({
+  amount: z.number().int().min(0).max(1_000_000_000),
+});
+
+export const companyRetainerUpdateSchema = z.object({
+  retainerAmount: z.number().int().min(0).max(1_000_000_000),
+});

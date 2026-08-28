@@ -191,6 +191,7 @@ a { color: inherit; text-decoration: none; }
 .login-card form { display: grid; gap: 18px; }
 .login-card form > label, .form-field { display: grid; gap: 8px; color: #3e464d; font-size: 13px; font-weight: 700; }
 .field-control { width: 100% !important; height: 44px !important; background: #fff !important; }
+.rate-input { max-width: 160px; }
 .input-with-icon { position: relative; }
 .input-with-icon > svg { position: absolute; left: 13px; top: 13px; z-index: 1; width: 17px; color: #7a838b; }
 .input-with-icon input { height: 44px; padding-left: 41px; background: #fff; }

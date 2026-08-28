@@ -653,6 +653,7 @@ function UsersAdmin() {
 }
 
 type CompanyRow = { id: number; name: string; domain: string; authMethod: string; retainerAmount: number };
+type BillingRateRow = { key: string; label: string; amount: number; updatedAt: string };
 type ClientInvoiceRow = {
   id: string;
   companyId: number;
@@ -684,20 +685,25 @@ function clientInvoiceStatusClass(status: ClientInvoiceRow["status"]) {
 function ClientBilling() {
   const [companiesList, setCompaniesList] = useState<CompanyRow[]>([]);
   const [rows, setRows] = useState<ClientInvoiceRow[]>([]);
+  const [rates, setRates] = useState<BillingRateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [savingRateKey, setSavingRateKey] = useState<string | null>(null);
+  const [savingCompanyId, setSavingCompanyId] = useState<number | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({ companyId: "", periodStart: today, periodEnd: today, scope: "total" as "parcial" | "total" });
 
   const load = async () => {
     try {
-      const [companiesResponse, billingResponse] = await Promise.all([
+      const [companiesResponse, billingResponse, ratesResponse] = await Promise.all([
         api<{ companies: CompanyRow[] }>("/api/admin/companies"),
         api<{ clientInvoices: ClientInvoiceRow[] }>("/api/admin/billing"),
+        api<{ billingRates: BillingRateRow[] }>("/api/admin/billing-rates"),
       ]);
       setCompaniesList(companiesResponse.companies);
       setRows(billingResponse.clientInvoices);
+      setRates(ratesResponse.billingRates);
       setForm((current) => ({ ...current, companyId: current.companyId || String(companiesResponse.companies[0]?.id ?? "") }));
     } catch {
       toast.error("Não foi possível carregar a facturação");
@@ -707,6 +713,40 @@ function ClientBilling() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const saveRate = async (key: string, amount: number) => {
+    if (!Number.isFinite(amount) || amount < 0) { toast.error("Valor inválido"); return; }
+    setSavingRateKey(key);
+    try {
+      const { billingRate } = await api<{ billingRate: BillingRateRow }>(`/api/admin/billing-rates/${key}`, {
+        method: "PATCH",
+        body: JSON.stringify({ amount }),
+      });
+      setRates((current) => current.map((rate) => (rate.key === key ? billingRate : rate)));
+      toast.success(`${billingRate.label}: ${money(billingRate.amount)}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar a tarifa");
+    } finally {
+      setSavingRateKey(null);
+    }
+  };
+
+  const saveRetainer = async (companyId: number, retainerAmount: number) => {
+    if (!Number.isFinite(retainerAmount) || retainerAmount < 0) { toast.error("Valor inválido"); return; }
+    setSavingCompanyId(companyId);
+    try {
+      const { company } = await api<{ company: CompanyRow }>(`/api/admin/companies/${companyId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ retainerAmount }),
+      });
+      setCompaniesList((current) => current.map((row) => (row.id === companyId ? company : row)));
+      toast.success(`Retainer de ${company.name}: ${money(company.retainerAmount)}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar o retainer");
+    } finally {
+      setSavingCompanyId(null);
+    }
+  };
 
   const generate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -754,6 +794,14 @@ function ClientBilling() {
     </section>
     <section className="panel">
       <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Empresa</TableHead><TableHead>Período</TableHead><TableHead>Origem</TableHead><TableHead>Total</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.id}</strong></TableCell><TableCell>{row.companyName}</TableCell><TableCell>{row.periodStart} a {row.periodEnd}</TableCell><TableCell>{row.generatedBy === "automatico" ? "Automática" : "Manual"} • {row.scope === "total" ? "Total" : "Parcial"}</TableCell><TableCell>{money(row.totalAmount)}</TableCell><TableCell><span className={clientInvoiceStatusClass(row.status)}>{CLIENT_INVOICE_STATUS_LABELS[row.status]}</span></TableCell><TableCell className="text-right">{row.status === "pendente_aprovacao" && <><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "approve")} aria-label={`Aprovar ${row.id}`}><Check /></Button><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "reject")} aria-label={`Rejeitar ${row.id}`}><XCircle /></Button></>}{row.status === "aprovada" && <Button size="sm" variant="outline" disabled={actingId === row.id} onClick={() => act(row.id, "send_to_accounting")}>Enviar à contabilidade</Button>}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Landmark /><h3>Sem facturas geradas</h3><p>Use o formulário acima para gerar a primeira.</p></div>}</div>
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><p>CONFIGURAÇÃO</p><h2>Tarifas por unidade</h2></div></div>
+      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Tarifa</TableHead><TableHead>Valor (AOA)</TableHead><TableHead>Actualizada</TableHead></TableRow></TableHeader><TableBody>{rates.map((rate) => <TableRow key={rate.key}><TableCell><strong>{rate.label}</strong></TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={rate.amount} disabled={savingRateKey === rate.key} onBlur={(event) => { const value = Number(event.target.value); if (value !== rate.amount) saveRate(rate.key, value); }} className="rate-input" /></TableCell><TableCell>{new Date(rate.updatedAt).toLocaleDateString("pt-PT")}</TableCell></TableRow>)}</TableBody></Table>{!loading && rates.length === 0 && <div className="empty-state"><Landmark /><h3>Sem tarifas semeadas</h3><p>A facturação usa os valores por omissão do Estudo de Viabilidade até semear <code>billing_rates</code>.</p></div>}</div>
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><p>CONFIGURAÇÃO</p><h2>Retainer por empresa</h2></div></div>
+      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Empresa</TableHead><TableHead>Domínio</TableHead><TableHead>Retainer mensal (AOA)</TableHead></TableRow></TableHeader><TableBody>{companiesList.map((company) => <TableRow key={company.id}><TableCell><strong>{company.name}</strong></TableCell><TableCell>{company.domain}</TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={company.retainerAmount} disabled={savingCompanyId === company.id} onBlur={(event) => { const value = Number(event.target.value); if (value !== company.retainerAmount) saveRetainer(company.id, value); }} className="rate-input" /></TableCell></TableRow>)}</TableBody></Table>{!loading && companiesList.length === 0 && <div className="empty-state"><Landmark /><h3>Sem empresas registadas</h3></div>}</div>
     </section>
   </>;
 }
