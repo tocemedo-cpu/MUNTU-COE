@@ -12,7 +12,6 @@ const SESSION_COOKIE_NAME = "muntu_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 dias
 
 declare global {
-  // eslint-disable-next-line no-var
   var __muntuSessionSecret: Uint8Array | undefined;
 }
 

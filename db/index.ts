@@ -34,7 +34,6 @@ if (parsedUrl.hostname.endsWith(".supabase.co") && !parsedUrl.hostname.includes(
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __muntuPg: ReturnType<typeof postgres> | undefined;
 }
 

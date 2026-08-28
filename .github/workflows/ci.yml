@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, typecheck, build, unit tests
+    runs-on: ubuntu-latest
+    env:
+      # O build analisa as rotas de API durante "next build" e exige
+      # DATABASE_URL definida, mas não chega a ligar-se à base de dados
+      # nesta fase — um valor plausível chega, não precisa de ser real.
+      DATABASE_URL: postgres://user:pass@aws-0-eu-west-1.pooler.supabase.com:6543/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      - run: npm run build
+
+      - run: npm test
+
+  integration:
+    name: Integration tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: muntu_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # sslmode=disable é obrigatório aqui: db/index.ts exige SSL por
+      # omissão (como o Supabase de produção exige), e este Postgres de
+      # serviço do runner não tem SSL configurado. Ver README §Testes.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/muntu_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Push schema to the test database
+        run: npx drizzle-kit push --force
+
+      - run: npm run test:integration

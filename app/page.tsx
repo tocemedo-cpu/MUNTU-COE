@@ -515,10 +515,18 @@ function SupplierProfile({ supplier, onUpdate }: { supplier: Supplier | undefine
   const [local, setLocal] = useState(supplier?.local ?? "");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { setCategory(supplier?.category ?? ""); setLocal(supplier?.local ?? ""); }, [supplier?.id]);
+  // Repõe o formulário quando o fornecedor ligado muda — feito durante o
+  // render (não num efeito) seguindo o padrão recomendado pelo React para
+  // "ajustar estado quando uma prop muda", evitando um render extra.
+  const [syncedSupplierId, setSyncedSupplierId] = useState(supplier?.id);
+  if (supplier?.id !== syncedSupplierId) {
+    setSyncedSupplierId(supplier?.id);
+    setCategory(supplier?.category ?? "");
+    setLocal(supplier?.local ?? "");
+  }
 
   if (!supplier) {
-    return <><PageHeader kicker="SUPPLIER PASSPORT" title="O meu perfil" description="A sua conta ainda não está ligada a um fornecedor." /><div className="empty-state panel"><Users /><h3>Perfil por ligar</h3><p>Peça ao System Admin para ligar a sua conta a um fornecedor concreto em "Utilizadores".</p></div></>;
+    return <><PageHeader kicker="SUPPLIER PASSPORT" title="O meu perfil" description="A sua conta ainda não está ligada a um fornecedor." /><div className="empty-state panel"><Users /><h3>Perfil por ligar</h3><p>Peça ao System Admin para ligar a sua conta a um fornecedor concreto em &quot;Utilizadores&quot;.</p></div></>;
   }
 
   const save = async (event: React.FormEvent) => {
