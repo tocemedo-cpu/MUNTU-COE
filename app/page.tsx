@@ -681,7 +681,91 @@ function Repository({ search, documents, onUpload, onDownload }: { search: strin
 ] as { label: string; Icon: typeof FileText; count: number }[]).map(({ label, Icon, count }, index) => <button className={index === 0 ? "active" : ""} key={label}><Icon /><span>{label}</span><b>{count}</b></button>)}</aside><div className="panel repository-table"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Documento</TableHead><TableHead>Tipo</TableHead><TableHead>Referência</TableHead><TableHead>Responsável</TableHead><TableHead>Versão</TableHead><TableHead>Actualizado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((doc) => <TableRow key={doc.id}><TableCell><div className="doc-name"><FileText /><strong>{doc.name}</strong></div></TableCell><TableCell>{doc.type}</TableCell><TableCell>{doc.request}</TableCell><TableCell>{doc.owner}</TableCell><TableCell>{doc.version}</TableCell><TableCell>{doc.updated}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => onDownload(doc)} aria-label={`Descarregar ${doc.name}`}><Download /></Button></TableCell></TableRow>)}</TableBody></Table></div></div></section></>;
 }
 
-function Administration({ user }: { user: AuthUser }) { const [settings, setSettings] = useState({ sla: true, escalations: true, supplier: true, payment: false }); const toggle = (key: keyof typeof settings) => setSettings((current) => ({ ...current, [key]: !current[key] })); return <><PageHeader kicker="CONFIGURAÇÃO E GOVERNANCE" title="Administração" description="Organização, utilizadores, matriz de autoridade, SLA, integrações e notificações." /><section className="admin-grid"><article className="panel"><div className="panel-heading"><div><p>ORGANIZAÇÃO</p><h2>{user.tenant}</h2></div><Badge>ANGOLA</Badge></div><div className="admin-fields"><label>Moeda principal<Input value="AOA — Kwanza angolano" readOnly /></label><label>Idioma<Input value="Português (Angola)" readOnly /></label><label>Fuso horário<Input value="Africa/Luanda (UTC+1)" readOnly /></label><label>Regime fiscal<Input value="Angola • IVA 14%" readOnly /></label></div><Button variant="outline" onClick={() => toast.success("Configuração guardada")}>Guardar configuração</Button></article><article className="panel"><div className="panel-heading"><div><p>AUTOMAÇÃO</p><h2>Alertas e controlos</h2></div></div><div className="settings-list"><label><div><strong>Alertas de SLA</strong><span>Notificar antes do vencimento</span></div><Switch checked={settings.sla} onCheckedChange={() => toggle("sla")} /></label><label><div><strong>Escalação automática</strong><span>Escalar itens vencidos ao owner</span></div><Switch checked={settings.escalations} onCheckedChange={() => toggle("escalations")} /></label><label><div><strong>Supplier Passport</strong><span>Bloquear fornecedor com documento crítico expirado</span></div><Switch checked={settings.supplier} onCheckedChange={() => toggle("supplier")} /></label><label><div><strong>Pagamento automático</strong><span>Enviar lote sem aprovação manual</span></div><Switch checked={settings.payment} onCheckedChange={() => toggle("payment")} /></label></div></article><article className="panel integration-panel"><div className="panel-heading"><div><p>INTEGRAÇÕES</p><h2>Sistemas conectados</h2></div></div>{[["ERP Financeiro", "SAP S/4HANA", "Activo"], ["Banco", "Ficheiro ISO 20022", "Activo"], ["Fiscalidade", "AGT / SAF-T", "Configurado"], ["Identidade", "Microsoft Entra ID", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article></section></>; }
+type SsoDraft = { authMethod: string; ssoIssuerUrl: string; ssoClientId: string; ssoClientSecret: string };
+
+function SsoSettings() {
+  const [companiesList, setCompaniesList] = useState<CompanyRow[]>([]);
+  const [drafts, setDrafts] = useState<Record<number, SsoDraft>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { companies } = await api<{ companies: CompanyRow[] }>("/api/admin/companies");
+        setCompaniesList(companies);
+        setDrafts(
+          Object.fromEntries(
+            companies.map((company) => [
+              company.id,
+              { authMethod: company.authMethod, ssoIssuerUrl: company.ssoIssuerUrl ?? "", ssoClientId: company.ssoClientId ?? "", ssoClientSecret: "" },
+            ])
+          )
+        );
+      } catch {
+        toast.error("Não foi possível carregar as empresas");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const updateDraft = (id: number, field: keyof SsoDraft, value: string) =>
+    setDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
+
+  const save = async (company: CompanyRow) => {
+    const draft = drafts[company.id];
+    setSavingId(company.id);
+    try {
+      const body: Record<string, string> = {
+        authMethod: draft.authMethod,
+        ssoIssuerUrl: draft.ssoIssuerUrl,
+        ssoClientId: draft.ssoClientId,
+      };
+      if (draft.ssoClientSecret) body.ssoClientSecret = draft.ssoClientSecret;
+      const { company: updated } = await api<{ company: CompanyRow }>(`/api/admin/companies/${company.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      setCompaniesList((current) => current.map((row) => (row.id === company.id ? updated : row)));
+      updateDraft(company.id, "ssoClientSecret", "");
+      toast.success(`SSO de ${updated.name} actualizado`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar o SSO");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return <article className="panel">
+    <div className="panel-heading"><div><p>IDENTIDADE</p><h2>SSO por empresa</h2></div></div>
+    <p className="muted">Cada empresa cliente escolhe o método de login pelo domínio do e-mail. SSO só produz um login funcional com credenciais reais de um fornecedor de identidade compatível com OpenID Connect Discovery — <code>redirect_uri</code> a configurar no IdP: <code>{typeof window !== "undefined" ? window.location.origin : ""}/api/auth/sso/callback</code>.</p>
+    {companiesList.map((company) => {
+      const draft = drafts[company.id] ?? { authMethod: "password", ssoIssuerUrl: "", ssoClientId: "", ssoClientSecret: "" };
+      return <div key={company.id} className="sso-company-row">
+        <div className="panel-heading"><div><p>{company.domain}</p><h3>{company.name}</h3></div></div>
+        <div className="admin-fields">
+          <label>Método de login<NativeSelect value={draft.authMethod} onChange={(event) => updateDraft(company.id, "authMethod", event.target.value)} className="field-control"><NativeSelectOption value="password">E-mail e palavra-passe</NativeSelectOption><NativeSelectOption value="sso">SSO (OIDC)</NativeSelectOption></NativeSelect></label>
+          <label>Issuer URL<Input value={draft.ssoIssuerUrl} onChange={(event) => updateDraft(company.id, "ssoIssuerUrl", event.target.value)} placeholder="https://login.microsoftonline.com/<tenant-id>/v2.0" /></label>
+          <label>Client ID<Input value={draft.ssoClientId} onChange={(event) => updateDraft(company.id, "ssoClientId", event.target.value)} /></label>
+          <label>Client Secret<Input type="password" value={draft.ssoClientSecret} onChange={(event) => updateDraft(company.id, "ssoClientSecret", event.target.value)} placeholder={company.hasSsoClientSecret ? "•••••••• (definido — deixe em branco para manter)" : "Não definido"} /></label>
+        </div>
+        <Button variant="outline" disabled={savingId === company.id} onClick={() => save(company)}>{savingId === company.id ? "A guardar…" : "Guardar SSO"}</Button>
+      </div>;
+    })}
+    {!loading && companiesList.length === 0 && <p className="muted">Sem empresas registadas.</p>}
+  </article>;
+}
+
+function Administration({ user }: { user: AuthUser }) {
+  return <><PageHeader kicker="CONFIGURAÇÃO E GOVERNANCE" title="Administração" description="Organização e identidade (SSO) por empresa." />
+    <section className="admin-grid">
+      <article className="panel"><div className="panel-heading"><div><p>ORGANIZAÇÃO</p><h2>{user.tenant}</h2></div><Badge>ANGOLA</Badge></div><div className="admin-fields"><label>Moeda principal<Input value="AOA — Kwanza angolano" readOnly /></label><label>Idioma<Input value="Português (Angola)" readOnly /></label><label>Fuso horário<Input value="Africa/Luanda (UTC+1)" readOnly /></label><label>Regime fiscal<Input value="Angola • IVA 14%" readOnly /></label></div></article>
+      <SsoSettings />
+      <article className="panel integration-panel"><div className="panel-heading"><div><p>ROADMAP</p><h2>Integrações planeadas</h2></div></div>{[["ERP Financeiro", "SAP S/4HANA"], ["Banco", "Ficheiro ISO 20022"], ["Fiscalidade", "AGT / SAF-T"], ["Identidade", "Microsoft Entra ID (via SSO acima)"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass("Planeado")}>Planeado</b></div>)}</article>
+    </section>
+  </>;
+}
 
 const ACCESS_LEVEL_LABELS: Record<AccessLevel, string> = {
   system_admin: "System Admin",
@@ -751,7 +835,16 @@ function UsersAdmin() {
   return <><PageHeader kicker="GESTÃO DE PLATAFORMA" title="Utilizadores" description="Conceda ou retire permissões — o System Admin é o único nível que pode alterar isto." /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Utilizador</TableHead><TableHead>E-mail</TableHead><TableHead>Empresa</TableHead><TableHead>Nível de acesso</TableHead><TableHead>Fornecedor</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.companyName ?? "—"}</TableCell><TableCell><NativeSelect value={row.accessLevel} disabled={savingId === row.id} onChange={(event) => changeAccessLevel(row.id, event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></TableCell><TableCell>{row.accessLevel === "supplier" ? <NativeSelect value={row.supplierId ?? ""} disabled={savingId === row.id} onChange={(event) => changeSupplier(row.id, row.accessLevel, event.target.value ? Number(event.target.value) : null)} className="field-control"><NativeSelectOption value="">Por ligar…</NativeSelectOption>{supplierOptions.map((supplier) => <NativeSelectOption key={supplier.id} value={supplier.id}>{supplier.name}</NativeSelectOption>)}</NativeSelect> : row.supplierName ?? "—"}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem utilizadores</h3></div>}</div></section></>;
 }
 
-type CompanyRow = { id: number; name: string; domain: string; authMethod: string; retainerAmount: number };
+type CompanyRow = {
+  id: number;
+  name: string;
+  domain: string;
+  authMethod: string;
+  retainerAmount: number;
+  ssoIssuerUrl: string | null;
+  ssoClientId: string | null;
+  hasSsoClientSecret: boolean;
+};
 type BillingRateRow = { key: string; label: string; amount: number; updatedAt: string };
 type ClientInvoiceRow = {
   id: string;

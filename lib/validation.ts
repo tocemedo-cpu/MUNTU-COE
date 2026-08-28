@@ -98,6 +98,13 @@ export const billingRateUpdateSchema = z.object({
   amount: z.number().int().min(0).max(1_000_000_000),
 });
 
-export const companyRetainerUpdateSchema = z.object({
-  retainerAmount: z.number().int().min(0).max(1_000_000_000),
+// Actualização parcial: só os campos presentes são alterados. ssoClientSecret
+// em branco/omitido significa "manter o actual" (nunca devolvido pelo GET,
+// não há como o formulário o reenviar sem querer trocá-lo).
+export const companyUpdateSchema = z.object({
+  retainerAmount: z.number().int().min(0).max(1_000_000_000).optional(),
+  authMethod: z.enum(["password", "sso"]).optional(),
+  ssoIssuerUrl: z.string().trim().max(500).optional(),
+  ssoClientId: z.string().trim().max(200).optional(),
+  ssoClientSecret: z.string().trim().max(500).optional(),
 });

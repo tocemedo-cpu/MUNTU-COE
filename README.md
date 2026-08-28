@@ -91,7 +91,7 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
 **Isto só produz um login funcional quando a empresa fornece credenciais reais** de um fornecedor de identidade compatível com OpenID Connect Discovery (Microsoft Entra ID, Google Workspace, Okta, ...). Para activar SSO para uma empresa:
 
 1. Registe uma aplicação OIDC no IdP da empresa, com `redirect_uri` = `https://<o-seu-domínio>/api/auth/sso/callback`.
-2. Actualize a linha da empresa em `companies` (ainda sem UI de administração — via SQL directo por agora):
+2. Preencha o método de login, issuer URL, client ID e client secret na página **Administração** (painel "SSO por empresa", só `system_admin`) — chama `PATCH /api/admin/companies/:id`. O client secret nunca é devolvido pela API depois de guardado (só um indicador "definido"/"não definido"); deixar o campo em branco ao editar mantém o valor actual. SQL directo continua a funcionar como alternativa:
    ```sql
    update public.companies
    set auth_method = 'sso',
@@ -145,7 +145,7 @@ Para activar o envio real: crie uma conta em [resend.com](https://resend.com), g
 | `/api/admin/users` | `GET` | Lista todos os utilizadores (só `system_admin`) |
 | `/api/admin/users/:id` | `PATCH` | Muda o nível de acesso/empresa de um utilizador (só `system_admin`) |
 | `/api/admin/companies` | `GET` | Lista as empresas clientes (só `system_admin`) |
-| `/api/admin/companies/:id` | `PATCH` | Actualiza o retainer mensal de uma empresa (só `system_admin`) |
+| `/api/admin/companies/:id` | `PATCH` | Actualiza retainer e/ou configuração de SSO de uma empresa — só os campos enviados mudam (só `system_admin`) |
 | `/api/admin/billing` | `GET`, `POST` | Lista/gera facturas de cobrança a clientes (só `system_admin`) |
 | `/api/admin/billing/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar/enviar à contabilidade (só `system_admin`) |
 | `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |
@@ -195,7 +195,7 @@ npm run db:seed
 Dois níveis, separados por design:
 
 - **`npm test`** — testes unitários (`tests/unit/`), sem qualquer base de dados: hashing/verificação de password, classificação de tiers de PO/factura, tokens de sessão (assinatura, adulteração, expiração) e os schemas zod. Correm em menos de um segundo, seguros de correr sempre, inclusive sem Postgres instalado.
-- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, a UI de admin de tarifas/retainer (`/api/admin/billing-rates`, `/api/admin/companies/:id`), o upload/download real de documentos (round trip completo dos bytes via `bytea`), e a recuperação de acesso (pedido sem enumeração de utilizadores, confirmação com token válido/expirado/mal-tipado, e que a nova password passa a funcionar no login). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
+- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, a UI de admin de tarifas/retainer/SSO (`/api/admin/billing-rates`, `/api/admin/companies/:id` — incluindo que o client secret nunca é devolvido e sobrevive a um PATCH que não o envie), o upload/download real de documentos (round trip completo dos bytes via `bytea`), e a recuperação de acesso (pedido sem enumeração de utilizadores, confirmação com token válido/expirado/mal-tipado, e que a nova password passa a funcionar no login). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
 
 Para correr os testes de integração é preciso um Postgres local (nunca aponte isto para o Supabase de produção):
 
