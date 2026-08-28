@@ -31,6 +31,10 @@ export const users = pgTable("users", {
   initials: text("initials").notNull(),
   tenant: text("tenant").notNull().default("Operadora Atlântico, SA"),
   companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
+  // Só para accessLevel = "supplier": qual fornecedor este utilizador
+  // representa. Sem isto ligado, o utilizador não vê POs/recepções/
+  // facturas nenhumas (âmbito vazio por omissão — nunca "vê tudo").
+  supplierId: bigint("supplier_id", { mode: "number" }).references(() => suppliers.id),
   // Autorização real (usada por middleware/rotas).
   accessLevel: text("access_level").notNull().default("requester"), // system_admin | coe_manager | analyst | supplier | company_admin | requester
   ssoSubject: text("sso_subject"),
@@ -79,6 +83,7 @@ export const purchaseOrders = pgTable("purchase_orders", {
   nextAction: text("next_action").notNull().default(""),
   requestId: text("request_id").references(() => requests.id),
   companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
+  supplierId: bigint("supplier_id", { mode: "number" }).references(() => suppliers.id),
   // automatico | standard | complexo — ver lib/billing.ts
   tier: text("tier").notNull().default("standard"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
@@ -89,6 +94,7 @@ export const receipts = pgTable("receipts", {
   po: text("po").notNull(),
   description: text("description").notNull(),
   supplier: text("supplier").notNull(),
+  supplierId: bigint("supplier_id", { mode: "number" }).references(() => suppliers.id),
   value: bigint("value", { mode: "number" }).notNull().default(0),
   progress: integer("progress").notNull().default(0),
   status: text("status").notNull().default("Em curso"),
@@ -103,6 +109,7 @@ export const invoices = pgTable("invoices", {
   status: text("status").notNull(),
   due: text("due").notNull(),
   companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
+  supplierId: bigint("supplier_id", { mode: "number" }).references(() => suppliers.id),
   // limpa | assistida | excecao — ver lib/billing.ts
   tier: text("tier").notNull().default("assistida"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),

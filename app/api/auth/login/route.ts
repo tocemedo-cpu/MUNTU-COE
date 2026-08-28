@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     userId: user.id,
     accessLevel: user.accessLevel as AccessLevel,
     companyId: user.companyId,
+    supplierId: user.supplierId,
   });
   const store = await cookies();
   store.set(SESSION_COOKIE_NAME, token, {

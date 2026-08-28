@@ -103,6 +103,7 @@ export async function GET(request: NextRequest) {
       userId: user.id,
       accessLevel: user.accessLevel as AccessLevel,
       companyId: user.companyId,
+      supplierId: user.supplierId,
     });
     store.set(SESSION_COOKIE_NAME, token, {
       httpOnly: true,

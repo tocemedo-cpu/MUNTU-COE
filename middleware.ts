@@ -51,6 +51,7 @@ export async function middleware(request: NextRequest) {
   headers.set("x-muntu-user-id", String(session.userId));
   headers.set("x-muntu-access-level", session.accessLevel);
   headers.set("x-muntu-company-id", session.companyId != null ? String(session.companyId) : "");
+  headers.set("x-muntu-supplier-id", session.supplierId != null ? String(session.supplierId) : "");
   return NextResponse.next({ request: { headers } });
 }
 

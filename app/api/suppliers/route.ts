@@ -1,11 +1,19 @@
-import { like } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { suppliers } from "@/db/schema";
-import { forbidUnless } from "@/lib/authz";
+import { forbidUnless, getSession } from "@/lib/authz";
 import { parseJsonBody, supplierCreateSchema } from "@/lib/validation";
 
 export async function GET(request: Request) {
   const db = getDb();
+  const session = getSession(request);
+
+  if (session.accessLevel === "supplier") {
+    if (session.supplierId == null) return Response.json({ suppliers: [] });
+    const rows = await db.select().from(suppliers).where(eq(suppliers.id, session.supplierId));
+    return Response.json({ suppliers: rows });
+  }
+
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
 

@@ -81,11 +81,23 @@ export async function seedIfEmpty(db: Db) {
     [company] = await db.insert(schema.companies).values(demoCompany).returning();
   }
 
+  let supplierRows = await db.select().from(schema.suppliers);
+  if (supplierRows.length === 0) {
+    supplierRows = await db.insert(schema.suppliers).values(demoSuppliers).returning();
+  }
+  const supplierIdByName = new Map(supplierRows.map((s) => [s.name, s.id]));
+
   const existingUsers = await db.select().from(schema.users).limit(1);
   if (existingUsers.length === 0) {
     await db
       .insert(schema.users)
-      .values(demoUsers.map((user) => ({ ...user, companyId: user.accessLevel === "company_admin" || user.accessLevel === "requester" ? company.id : null })))
+      .values(
+        demoUsers.map((user) => ({
+          ...user,
+          companyId: user.accessLevel === "company_admin" || user.accessLevel === "requester" ? company.id : null,
+          supplierId: user.accessLevel === "supplier" ? (supplierIdByName.get("Kwanza Industrial") ?? null) : null,
+        }))
+      )
       .onConflictDoNothing();
   }
 
@@ -103,15 +115,23 @@ export async function seedIfEmpty(db: Db) {
         }))
       )
       .onConflictDoNothing();
-    await db.insert(schema.suppliers).values(demoSuppliers).onConflictDoNothing();
     await db
       .insert(schema.purchaseOrders)
-      .values(demoPurchaseOrders.map((po) => ({ ...po, companyId: company.id })))
+      .values(demoPurchaseOrders.map((po) => ({ ...po, companyId: company.id, supplierId: supplierIdByName.get(po.supplier) ?? null })))
       .onConflictDoNothing();
-    await db.insert(schema.receipts).values(demoReceipts);
+    await db
+      .insert(schema.receipts)
+      .values(demoReceipts.map((receipt) => ({ ...receipt, supplierId: supplierIdByName.get(receipt.supplier) ?? null })));
     await db
       .insert(schema.invoices)
-      .values(demoInvoices.map((invoice) => ({ ...invoice, companyId: company.id, tier: classifyInvoiceTier(invoice) })))
+      .values(
+        demoInvoices.map((invoice) => ({
+          ...invoice,
+          companyId: company.id,
+          supplierId: supplierIdByName.get(invoice.supplier) ?? null,
+          tier: classifyInvoiceTier(invoice),
+        }))
+      )
       .onConflictDoNothing();
     await db.insert(schema.exceptions).values(demoExceptions).onConflictDoNothing();
     await db.insert(schema.paymentBatches).values(demoPaymentBatches).onConflictDoNothing();

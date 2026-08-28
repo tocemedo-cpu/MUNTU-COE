@@ -78,6 +78,11 @@ create table if not exists public.suppliers (
   created_at timestamptz not null default now()
 );
 
+-- Só para access_level = 'supplier': qual fornecedor este utilizador
+-- representa. Sem isto ligado, o utilizador não vê POs/recepções/
+-- facturas nenhumas (âmbito vazio por omissão — nunca "vê tudo").
+alter table public.users add column if not exists supplier_id bigint references public.suppliers (id);
+
 create table if not exists public.purchase_orders (
   id text primary key,
   supplier text not null,
@@ -89,6 +94,7 @@ create table if not exists public.purchase_orders (
 
 alter table public.purchase_orders add column if not exists request_id text references public.requests (id);
 alter table public.purchase_orders add column if not exists company_id bigint references public.companies (id);
+alter table public.purchase_orders add column if not exists supplier_id bigint references public.suppliers (id);
 alter table public.purchase_orders add column if not exists tier text not null default 'standard'; -- automatico | standard | complexo
 alter table public.purchase_orders add column if not exists created_at timestamptz not null default now();
 
@@ -102,6 +108,8 @@ create table if not exists public.receipts (
   status text not null default 'Em curso'
 );
 
+alter table public.receipts add column if not exists supplier_id bigint references public.suppliers (id);
+
 create table if not exists public.invoices (
   id text primary key,
   supplier text not null,
@@ -111,6 +119,8 @@ create table if not exists public.invoices (
   status text not null,
   due text not null
 );
+
+alter table public.invoices add column if not exists supplier_id bigint references public.suppliers (id);
 
 alter table public.invoices add column if not exists company_id bigint references public.companies (id);
 alter table public.invoices add column if not exists tier text not null default 'assistida'; -- limpa | assistida | excecao
@@ -360,6 +370,17 @@ set company_id = c.id,
     end
 from public.companies c
 where c.domain = 'operadora.ao';
+
+-- Backfill: liga POs, recepções e facturas ao fornecedor (por nome), e
+-- o utilizador de demonstração Carlos Mateus à Kwanza Industrial.
+update public.purchase_orders po set supplier_id = s.id from public.suppliers s where s.name = po.supplier;
+update public.receipts r set supplier_id = s.id from public.suppliers s where s.name = r.supplier;
+update public.invoices i set supplier_id = s.id from public.suppliers s where s.name = i.supplier;
+
+update public.users
+set supplier_id = s.id
+from public.suppliers s
+where s.name = 'Kwanza Industrial' and public.users.email = 'carlos.mateus@kwanzaindustrial.ao';
 
 insert into public.billing_rates (key, label, amount) values
   ('po_automatico', 'PO automático/catalogado', 7000),

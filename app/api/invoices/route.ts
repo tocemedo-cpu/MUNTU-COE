@@ -9,6 +9,12 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
   const session = getSession(request);
 
+  if (session.accessLevel === "supplier") {
+    if (session.supplierId == null) return Response.json({ invoices: [] });
+    const rows = await db.select().from(invoices).where(eq(invoices.supplierId, session.supplierId));
+    return Response.json({ invoices: rows });
+  }
+
   const conditions = [];
   if (session.accessLevel === "company_admin" && session.companyId != null) {
     conditions.push(eq(invoices.companyId, session.companyId));

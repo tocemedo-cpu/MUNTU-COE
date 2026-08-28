@@ -4,6 +4,7 @@ export type SessionPayload = {
   userId: number;
   accessLevel: AccessLevel;
   companyId: number | null;
+  supplierId: number | null;
   exp: number;
 };
 

@@ -90,7 +90,7 @@ type ExceptionItem = { id: string; title: string; ref: string; owner: string; ag
 type PaymentBatch = { id: string; date: string; count: number; value: number; status: string; released: boolean };
 type DocumentItem = { id: number; name: string; type: string; request: string; owner: string; version: string; updated: string };
 type AccessLevel = "system_admin" | "coe_manager" | "analyst" | "supplier" | "company_admin" | "requester";
-type AuthUser = { id: number; name: string; email: string; role: string; initials: string; tenant: string; accessLevel: AccessLevel; companyId: number | null };
+type AuthUser = { id: number; name: string; email: string; role: string; initials: string; tenant: string; accessLevel: AccessLevel; companyId: number | null; supplierId: number | null };
 
 const stages = ["Intake", "Validação", "Aprovação", "PO", "Receção", "Factura", "Excepção", "Pagamento"];
 
@@ -418,6 +418,19 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     }
   };
 
+  const updateSupplierProfile = async (id: number, fields: { category?: string; local?: string }) => {
+    try {
+      const { supplier: updated } = await api<{ supplier: Supplier }>(`/api/suppliers/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(fields),
+      });
+      setSuppliersList((items) => items.map((item) => (item.id === id ? updated : item)));
+      toast.success("Perfil actualizado");
+    } catch {
+      toast.error("Não foi possível actualizar o perfil");
+    }
+  };
+
   const uploadDocument = async () => {
     try {
       const { document: created } = await api<{ document: DocumentItem }>("/api/documents", {
@@ -444,7 +457,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "new-request" && <NewRequest step={wizardStep} setStep={setWizardStep} form={form} setForm={setForm} submit={submitRequest} suppliers={suppliersList} />}
           {view === "requests" && <RequestsTable title="Meus pedidos" subtitle="Acompanhe prioridade, responsável, etapa e SLA em tempo real." requests={filteredRequests} onSelect={setSelectedRequest} />}
           {view === "approvals" && <Approvals requests={requests.filter((item) => item.status === "Aprovação")} onAction={actOnRequest} onSelect={setSelectedRequest} />}
-          {view === "suppliers" && <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} />}
+          {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} />)}
           {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} />}
           {view === "invoices" && <Invoices search={search} invoices={invoicesList} />}
@@ -497,6 +510,45 @@ function Approvals({ requests, onAction, onSelect }: { requests: RequestItem[]; 
 
 function Suppliers({ search, suppliers, onInvite }: { search: string; suppliers: Supplier[]; onInvite: () => void }) { const list = suppliers.filter((supplier) => supplier.name.toLowerCase().includes(search.toLowerCase())); const passportAvg = suppliers.length ? Math.round(suppliers.reduce((sum, item) => sum + item.passport, 0) / suppliers.length) : 0; return <><PageHeader kicker="SUPPLIER PASSPORT" title="Fornecedores" description="Onboarding, compliance, conteúdo local, risco e desempenho numa única vista." action={<Button className="btn-burgundy" onClick={onInvite}><Plus /> Convidar fornecedor</Button>} /><section className="supplier-summary"><article><Users /><div><strong>{suppliers.length}</strong><span>Fornecedores registados</span></div></article><article><ShieldCheck /><div><strong>{passportAvg}%</strong><span>Passport médio</span></div></article><article><Globe2 /><div><strong>{suppliers.filter((item) => item.status === "Activo").length}</strong><span>Fornecedores activos</span></div></article><article><AlertTriangle /><div><strong>{suppliers.filter((item) => item.status === "Revisão" || item.status === "Documentos").length}</strong><span>Revisões pendentes</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Categoria</TableHead><TableHead>Supplier Passport</TableHead><TableHead>Conteúdo local</TableHead><TableHead>Risco</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((supplier) => <TableRow key={supplier.id}><TableCell><strong>{supplier.name}</strong></TableCell><TableCell>{supplier.category}</TableCell><TableCell><div className="passport-cell"><Progress value={supplier.passport} /><span>{supplier.passport}%</span></div></TableCell><TableCell>{supplier.local}</TableCell><TableCell><span className={supplier.risk === "Baixo" ? "risk-low" : "risk-medium"}>{supplier.risk}</span></TableCell><TableCell><span className={statusClass(supplier.status)}>{supplier.status}</span></TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`Supplier Passport: ${supplier.name}`)}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section></>; }
 
+function SupplierProfile({ supplier, onUpdate }: { supplier: Supplier | undefined; onUpdate: (id: number, fields: { category?: string; local?: string }) => Promise<void> }) {
+  const [category, setCategory] = useState(supplier?.category ?? "");
+  const [local, setLocal] = useState(supplier?.local ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setCategory(supplier?.category ?? ""); setLocal(supplier?.local ?? ""); }, [supplier?.id]);
+
+  if (!supplier) {
+    return <><PageHeader kicker="SUPPLIER PASSPORT" title="O meu perfil" description="A sua conta ainda não está ligada a um fornecedor." /><div className="empty-state panel"><Users /><h3>Perfil por ligar</h3><p>Peça ao System Admin para ligar a sua conta a um fornecedor concreto em "Utilizadores".</p></div></>;
+  }
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onUpdate(supplier.id, { category, local });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <><PageHeader kicker="SUPPLIER PASSPORT" title="O meu perfil" description="Dados visíveis à Muntu COE e às empresas clientes." />
+    <section className="supplier-summary">
+      <article><ShieldCheck /><div><strong>{supplier.passport}%</strong><span>Supplier Passport</span></div></article>
+      <article><Globe2 /><div><strong>{supplier.local}</strong><span>Conteúdo local</span></div></article>
+      <article><AlertTriangle /><div><strong>{supplier.risk}</strong><span>Classificação de risco</span></div></article>
+      <article><CheckCircle2 /><div><strong>{supplier.status}</strong><span>Estado</span></div></article>
+    </section>
+    <section className="panel">
+      <form onSubmit={save} className="form-grid">
+        <label className="form-field span-2">Categoria<Input value={category} onChange={(event) => setCategory(event.target.value)} /></label>
+        <label className="form-field">Conteúdo local<Input value={local} onChange={(event) => setLocal(event.target.value)} placeholder="ex.: 85%" /></label>
+        <Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A guardar…" : "Guardar"} <ArrowRight /></Button>
+      </form>
+      <p className="muted">O Supplier Passport, a classificação de risco e o estado são avaliados pela Muntu COE — não são editáveis aqui.</p>
+    </section>
+  </>;
+}
+
 function PurchaseOrders({ purchaseOrders }: { purchaseOrders: PurchaseOrder[] }) { return <><PageHeader kicker="PURCHASE ORDER CONTROL TOWER" title="Ordens de compra" description="Emissão, confirmação, expediting, alterações e entrega controlados ponta-a-ponta." action={<Button variant="outline"><Download /> Exportar mapa</Button>} /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Fornecedor</TableHead><TableHead>Descrição</TableHead><TableHead>Valor AOA</TableHead><TableHead>Estado</TableHead><TableHead>Próxima acção</TableHead><TableHead /></TableRow></TableHeader><TableBody>{purchaseOrders.map((po) => <TableRow key={po.id}><TableCell><strong>{po.id}</strong></TableCell><TableCell>{po.supplier}</TableCell><TableCell>{po.description}</TableCell><TableCell>{money(po.value)}</TableCell><TableCell><span className={statusClass(po.status)}>{po.status}</span></TableCell><TableCell>{po.nextAction}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`Linha temporal de ${po.id}`)}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section></>; }
 
 function Receipts({ receipts, onConfirm }: { receipts: Receipt[]; onConfirm: (id: number) => void }) { return <><PageHeader kicker="GOODS & SERVICE RECEIPT" title="Recepções" description="Confirme quantidade, qualidade, evidência e data para desbloquear a factura." /><div className="receipt-grid">{receipts.map((item) => <article className="receipt-card" key={item.id}><div><span className="receipt-icon"><PackageCheck /></span><span className={statusClass(item.status)}>{item.status}</span></div><small>{item.po}</small><h2>{item.description}</h2><p>{item.supplier}</p><strong>{money(item.value)}</strong><div className="receipt-progress"><Progress value={item.progress} /><span>{item.progress}% entregue</span></div><Button className={item.progress === 100 && item.status !== "Confirmada" ? "btn-burgundy" : ""} variant={item.progress === 100 && item.status !== "Confirmada" ? "default" : "outline"} disabled={item.status === "Confirmada"} onClick={() => item.progress === 100 ? onConfirm(item.id) : toast.info("Evidência aberta")}>{item.status === "Confirmada" ? "Recepção confirmada" : item.progress === 100 ? "Confirmar recepção" : "Ver evidência"}</Button></article>)}</div></>; }
@@ -533,18 +585,24 @@ const ACCESS_LEVEL_LABELS: Record<AccessLevel, string> = {
   supplier: "Fornecedor",
 };
 
-type AdminUserRow = { id: number; name: string; email: string; role: string; accessLevel: AccessLevel; companyId: number | null; companyName: string | null };
+type AdminUserRow = { id: number; name: string; email: string; role: string; accessLevel: AccessLevel; companyId: number | null; companyName: string | null; supplierId: number | null; supplierName: string | null };
+type SupplierOption = { id: number; name: string };
 
 function UsersAdmin() {
   const [rows, setRows] = useState<AdminUserRow[]>([]);
+  const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const { users: list } = await api<{ users: AdminUserRow[] }>("/api/admin/users");
+        const [{ users: list }, { suppliers: supplierList }] = await Promise.all([
+          api<{ users: AdminUserRow[] }>("/api/admin/users"),
+          api<{ suppliers: SupplierOption[] }>("/api/suppliers"),
+        ]);
         setRows(list);
+        setSupplierOptions(supplierList);
       } catch {
         toast.error("Não foi possível carregar os utilizadores");
       } finally {
@@ -569,7 +627,21 @@ function UsersAdmin() {
     }
   };
 
-  return <><PageHeader kicker="GESTÃO DE PLATAFORMA" title="Utilizadores" description="Conceda ou retire permissões — o System Admin é o único nível que pode alterar isto." /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Utilizador</TableHead><TableHead>E-mail</TableHead><TableHead>Empresa</TableHead><TableHead>Nível de acesso</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.companyName ?? "—"}</TableCell><TableCell><NativeSelect value={row.accessLevel} disabled={savingId === row.id} onChange={(event) => changeAccessLevel(row.id, event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem utilizadores</h3></div>}</div></section></>;
+  const changeSupplier = async (id: number, accessLevel: AccessLevel, supplierId: number | null) => {
+    setSavingId(id);
+    try {
+      await api(`/api/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ accessLevel, supplierId }) });
+      const supplierName = supplierOptions.find((s) => s.id === supplierId)?.name ?? null;
+      setRows((current) => current.map((row) => (row.id === id ? { ...row, supplierId, supplierName } : row)));
+      toast.success("Fornecedor ligado");
+    } catch {
+      toast.error("Não foi possível ligar o fornecedor");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return <><PageHeader kicker="GESTÃO DE PLATAFORMA" title="Utilizadores" description="Conceda ou retire permissões — o System Admin é o único nível que pode alterar isto." /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Utilizador</TableHead><TableHead>E-mail</TableHead><TableHead>Empresa</TableHead><TableHead>Nível de acesso</TableHead><TableHead>Fornecedor</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.companyName ?? "—"}</TableCell><TableCell><NativeSelect value={row.accessLevel} disabled={savingId === row.id} onChange={(event) => changeAccessLevel(row.id, event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></TableCell><TableCell>{row.accessLevel === "supplier" ? <NativeSelect value={row.supplierId ?? ""} disabled={savingId === row.id} onChange={(event) => changeSupplier(row.id, row.accessLevel, event.target.value ? Number(event.target.value) : null)} className="field-control"><NativeSelectOption value="">Por ligar…</NativeSelectOption>{supplierOptions.map((supplier) => <NativeSelectOption key={supplier.id} value={supplier.id}>{supplier.name}</NativeSelectOption>)}</NativeSelect> : row.supplierName ?? "—"}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem utilizadores</h3></div>}</div></section></>;
 }
 
 type CompanyRow = { id: number; name: string; domain: string; authMethod: string; retainerAmount: number };

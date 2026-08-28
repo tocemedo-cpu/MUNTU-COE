@@ -40,6 +40,22 @@ export const supplierCreateSchema = z.object({
   category: z.string().trim().max(120).optional(),
 });
 
+// Edição interna (Muntu): pode mexer em tudo, incluindo passport/risco/
+// estado — são avaliações da Muntu, não auto-declaradas pelo fornecedor.
+export const supplierUpdateSchema = z.object({
+  category: z.string().trim().max(120).optional(),
+  local: z.string().trim().max(20).optional(),
+  passport: z.number().int().min(0).max(100).optional(),
+  risk: z.enum(["Baixo", "Médio", "Alto"]).optional(),
+  status: z.string().trim().max(60).optional(),
+});
+
+// Auto-edição do fornecedor: só os campos que ele próprio pode declarar.
+export const supplierSelfUpdateSchema = z.object({
+  category: z.string().trim().max(120).optional(),
+  local: z.string().trim().max(20).optional(),
+});
+
 export const receiptActionSchema = z.object({
   action: z.literal("confirm"),
 });
@@ -61,6 +77,7 @@ export const documentCreateSchema = z.object({
 export const userAccessUpdateSchema = z.object({
   accessLevel: z.enum(["system_admin", "coe_manager", "analyst", "supplier", "company_admin", "requester"]),
   companyId: z.number().int().positive().nullable().optional(),
+  supplierId: z.number().int().positive().nullable().optional(),
 });
 
 export const clientInvoiceGenerateSchema = z.object({

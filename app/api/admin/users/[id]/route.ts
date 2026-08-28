@@ -17,6 +17,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     .set({
       accessLevel: parsed.data.accessLevel,
       companyId: parsed.data.companyId !== undefined ? parsed.data.companyId : existing.companyId,
+      supplierId: parsed.data.supplierId !== undefined ? parsed.data.supplierId : existing.supplierId,
     })
     .where(eq(users.id, Number(id)))
     .returning();

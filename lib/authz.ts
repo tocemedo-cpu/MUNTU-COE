@@ -4,6 +4,7 @@ export type RequestSession = {
   userId: number;
   accessLevel: AccessLevel;
   companyId: number | null;
+  supplierId: number | null;
 };
 
 /** Lê a sessão verificada que o middleware já injectou nos headers. */
@@ -12,6 +13,7 @@ export function getSession(request: Request): RequestSession {
     userId: Number(request.headers.get("x-muntu-user-id")),
     accessLevel: (request.headers.get("x-muntu-access-level") ?? "requester") as AccessLevel,
     companyId: request.headers.get("x-muntu-company-id") ? Number(request.headers.get("x-muntu-company-id")) : null,
+    supplierId: request.headers.get("x-muntu-supplier-id") ? Number(request.headers.get("x-muntu-supplier-id")) : null,
   };
 }
 
