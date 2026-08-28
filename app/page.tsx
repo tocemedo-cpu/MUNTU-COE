@@ -176,14 +176,30 @@ function PublicSite({ onLogin }: { onLogin: () => void }) {
   </div>;
 }
 
-function Login({ onBack, onSuccess, initialError }: { onBack: () => void; onSuccess: (user: AuthUser) => void; initialError?: string }) {
+function Login({
+  onBack,
+  onSuccess,
+  initialError,
+  resetToken,
+  onResetTokenConsumed,
+}: {
+  onBack: () => void;
+  onSuccess: (user: AuthUser) => void;
+  initialError?: string;
+  resetToken?: string;
+  onResetTokenConsumed: () => void;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [step, setStep] = useState<"email" | "password">("email");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [step, setStep] = useState<"email" | "password" | "forgot" | "reset">(resetToken ? "reset" : "email");
   const [ssoCompanyName, setSsoCompanyName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
 
   useEffect(() => { if (initialError) toast.error(initialError); }, [initialError]);
+  useEffect(() => { if (resetToken) setStep("reset"); }, [resetToken]);
 
   const continueWithEmail = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -226,9 +242,47 @@ function Login({ onBack, onSuccess, initialError }: { onBack: () => void; onSucc
     }
   };
 
+  const requestPasswordReset = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    try {
+      await api("/api/auth/password-reset/request", { method: "POST", body: JSON.stringify({ email }) });
+      setForgotSent(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível pedir a recuperação de acesso");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmPasswordReset = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (newPassword !== confirmPassword) {
+      toast.error("As palavras-passe não coincidem");
+      return;
+    }
+    setLoading(true);
+    try {
+      await api("/api/auth/password-reset/confirm", {
+        method: "POST",
+        body: JSON.stringify({ token: resetToken, password: newPassword }),
+      });
+      toast.success("Palavra-passe actualizada — inicie sessão com a nova palavra-passe");
+      onResetTokenConsumed();
+      setStep("email");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar a palavra-passe");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return <main className="login-page">
     <section className="login-visual"><button className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button><Brand inverse /><div className="login-message"><Badge>PORTAL OPERACIONAL</Badge><h1>Todos os pedidos. Todos os intervenientes. Um único fluxo.</h1><p>Acompanhe o trabalho do intake ao pagamento, com SLA, documentação e responsabilidades visíveis.</p><div className="login-stats"><div><strong>96,4%</strong><span>SLA</span></div><div><strong>42</strong><span>pedidos activos</span></div><div><strong>3,2d</strong><span>ciclo médio</span></div></div></div></section>
-    <section className="login-panel"><div className="login-card"><div className="mobile-login-brand"><Brand /></div><p className="kicker">BEM-VINDO DE VOLTA</p><h2>Aceda ao Muntu COE</h2><p className="muted">Introduza o seu e-mail — o portal identifica automaticamente o seu perfil e decide se é SSO ou palavra-passe.</p>
+    <section className="login-panel"><div className="login-card"><div className="mobile-login-brand"><Brand /></div><p className="kicker">BEM-VINDO DE VOLTA</p><h2>Aceda ao Muntu COE</h2>
+      {step === "email" && !ssoCompanyName && <p className="muted">Introduza o seu e-mail — o portal identifica automaticamente o seu perfil e decide se é SSO ou palavra-passe.</p>}
       {step === "email" && !ssoCompanyName && <form onSubmit={continueWithEmail}>
         <label>E-mail corporativo<div className="input-with-icon"><Mail /><Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus /></div></label>
         <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={loading}>{loading ? "A verificar…" : "Continuar"} <ArrowRight /></Button>
@@ -241,9 +295,26 @@ function Login({ onBack, onSuccess, initialError }: { onBack: () => void; onSucc
       {step === "password" && !ssoCompanyName && <form onSubmit={submitPassword}>
         <p className="muted">{email}</p>
         <label>Palavra-passe<div className="input-with-icon"><KeyRound /><Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required autoFocus /></div></label>
-        <div className="login-options"><label className="remember"><Switch defaultChecked size="sm" /> Manter sessão</label><button type="button">Recuperar acesso</button></div>
+        <div className="login-options"><label className="remember"><Switch defaultChecked size="sm" /> Manter sessão</label><button type="button" onClick={() => setStep("forgot")}>Recuperar acesso</button></div>
         <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={loading}>{loading ? "A entrar…" : "Entrar no portal"} <ArrowRight /></Button>
         <button type="button" className="back-link" onClick={() => setStep("email")}>Usar outro e-mail</button>
+      </form>}
+      {step === "forgot" && !forgotSent && <form onSubmit={requestPasswordReset}>
+        <p className="muted">Introduza o seu e-mail — se existir uma conta com palavra-passe local, enviamos um link para a repor.</p>
+        <label>E-mail corporativo<div className="input-with-icon"><Mail /><Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus /></div></label>
+        <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={loading}>{loading ? "A enviar…" : "Enviar link de recuperação"} <ArrowRight /></Button>
+        <button type="button" className="back-link" onClick={() => setStep("password")}>Voltar</button>
+      </form>}
+      {step === "forgot" && forgotSent && <div className="wizard-step">
+        <p>Se existir uma conta com o e-mail <strong>{email}</strong>, enviámos um link para repor a palavra-passe. Verifique a caixa de entrada (e o spam) — o link expira em 30 minutos.</p>
+        <button type="button" className="back-link" onClick={() => { setForgotSent(false); setStep("password"); }}>Voltar ao login</button>
+      </div>}
+      {step === "reset" && <form onSubmit={confirmPasswordReset}>
+        <p className="muted">Defina uma nova palavra-passe para a sua conta.</p>
+        <label>Nova palavra-passe<div className="input-with-icon"><KeyRound /><Input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required minLength={8} autoFocus /></div></label>
+        <label>Confirmar palavra-passe<div className="input-with-icon"><KeyRound /><Input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required minLength={8} /></div></label>
+        <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={loading}>{loading ? "A actualizar…" : "Definir nova palavra-passe"} <ArrowRight /></Button>
+        <button type="button" className="back-link" onClick={() => { onResetTokenConsumed(); setStep("email"); }}>Cancelar</button>
       </form>}
     <div className="secure-note"><ShieldCheck /><span>Ambiente seguro • Autenticação ligada à base de dados • AOA</span></div></div></section>
   </main>;
@@ -841,6 +912,7 @@ export default function HomePage() {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [ssoError, setSsoError] = useState<string | undefined>(undefined);
+  const [resetToken, setResetToken] = useState<string | undefined>(undefined);
 
   const navigate = (next: "public" | "login" | "portal") => { setScreen(next); window.history.replaceState(null, "", next === "public" ? window.location.pathname : `#${next}`); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
@@ -848,8 +920,10 @@ export default function HomePage() {
     const hash = window.location.hash;
     const params = new URLSearchParams(window.location.search);
     const errorFromSso = params.get("sso_error");
-    if (errorFromSso) {
-      setSsoError(errorFromSso);
+    const tokenFromReset = params.get("reset_token");
+    if (errorFromSso || tokenFromReset) {
+      if (errorFromSso) setSsoError(errorFromSso);
+      if (tokenFromReset) setResetToken(tokenFromReset);
       window.history.replaceState(null, "", window.location.pathname + "#login");
     }
     (async () => {
@@ -858,15 +932,15 @@ export default function HomePage() {
         // "sessão expirada" numa visita sem sessão nenhuma — um 401 aqui
         // é o resultado normal de ainda não ter feito login.
         const response = await fetch("/api/auth/me");
-        if (response.ok && !errorFromSso) {
+        if (response.ok && !errorFromSso && !tokenFromReset) {
           const { user: restored } = (await response.json()) as { user: AuthUser };
           setUser(restored);
           setScreen("portal");
-        } else if (hash === "#login" || errorFromSso) {
+        } else if (hash === "#login" || errorFromSso || tokenFromReset) {
           setScreen("login");
         }
       } catch {
-        if (hash === "#login" || errorFromSso) setScreen("login");
+        if (hash === "#login" || errorFromSso || tokenFromReset) setScreen("login");
       } finally {
         setSessionChecked(true);
       }
@@ -897,7 +971,7 @@ export default function HomePage() {
     return <div className="empty-state panel"><Sparkles /><h3>A carregar…</h3></div>;
   }
   if (screen === "login" || (screen === "portal" && !user)) {
-    return <><Toaster richColors position="top-right" /><Login onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} initialError={ssoError} /></>;
+    return <><Toaster richColors position="top-right" /><Login onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} initialError={ssoError} resetToken={resetToken} onResetTokenConsumed={() => setResetToken(undefined)} /></>;
   }
   if (screen === "portal" && user) {
     return <Portal user={user} onLogout={logout} />;

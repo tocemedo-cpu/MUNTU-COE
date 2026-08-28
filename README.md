@@ -100,6 +100,14 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
    ```
 3. O primeiro login por SSO cria automaticamente o utilizador (nível `requester` por omissão) e liga-o a essa empresa.
 
+### Recuperar acesso
+
+O botão "Recuperar acesso" (só aparece para contas de e-mail/password — contas SSO não têm password local para repor) chama `POST /api/auth/password-reset/request` com o e-mail. A resposta é sempre `{ ok: true }`, exista ou não uma conta com esse e-mail — nunca revela quais contas existem. Se existir e tiver password local, é gerado um token assinado (30 minutos, mesmo mecanismo HMAC das sessões, com `purpose: "password_reset"` para nunca ser confundido com um cookie de sessão) e enviado por e-mail via [Resend](https://resend.com) com o link `/?reset_token=<token>#login`. Abrir esse link mostra o formulário de nova password; submeter chama `POST /api/auth/password-reset/confirm`.
+
+**Sem `RESEND_API_KEY` definida**, o pedido continua a funcionar exactamente da mesma forma (nunca falha, nunca revela nada) — só que o link fica registado nos logs do servidor (`console.warn`) em vez de ser enviado por e-mail, tal como o SSO só fica totalmente funcional com credenciais reais do IdP. Para activar o envio real: crie uma conta em resend.com, verifique um domínio de envio, e defina `RESEND_API_KEY` (e opcionalmente `RESEND_FROM_EMAIL`).
+
+**Limitação conhecida:** o token é reutilizável dentro da janela de 30 minutos (sem registo de "já usado" numa tabela) — mais simples de implementar e testar, ao custo de uma janela pequena onde o mesmo link, se interceptado, podia repor a password mais do que uma vez.
+
 ## Rotas de API
 
 | Rota | Métodos | Descrição |
@@ -110,6 +118,8 @@ O login pede primeiro o e-mail, consulta `/api/auth/company-lookup` para saber a
 | `/api/auth/sso/callback` | `GET` | Troca o código OIDC por tokens, verifica o ID token e cria a sessão |
 | `/api/auth/me` | `GET` | Utilizador da sessão actual (restaura o login ao recarregar) |
 | `/api/auth/logout` | `POST` | Termina a sessão |
+| `/api/auth/password-reset/request` | `POST` | Pede um link de recuperação de acesso (resposta genérica, sem enumeração) |
+| `/api/auth/password-reset/confirm` | `POST` | Define nova palavra-passe a partir do token do link |
 | `/api/dashboard` | `GET` | Métricas agregadas do pipeline P2P |
 | `/api/requests` | `GET`, `POST` | Listar/criar pedidos |
 | `/api/requests/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar pedido |
@@ -178,7 +188,7 @@ npm run db:seed
 Dois níveis, separados por design:
 
 - **`npm test`** — testes unitários (`tests/unit/`), sem qualquer base de dados: hashing/verificação de password, classificação de tiers de PO/factura, tokens de sessão (assinatura, adulteração, expiração) e os schemas zod. Correm em menos de um segundo, seguros de correr sempre, inclusive sem Postgres instalado.
-- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, a UI de admin de tarifas/retainer (`/api/admin/billing-rates`, `/api/admin/companies/:id`), e o upload/download real de documentos (round trip completo dos bytes via `bytea`). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
+- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, a UI de admin de tarifas/retainer (`/api/admin/billing-rates`, `/api/admin/companies/:id`), o upload/download real de documentos (round trip completo dos bytes via `bytea`), e a recuperação de acesso (pedido sem enumeração de utilizadores, confirmação com token válido/expirado/mal-tipado, e que a nova password passa a funcionar no login). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
 
 Para correr os testes de integração é preciso um Postgres local (nunca aponte isto para o Supabase de produção):
 

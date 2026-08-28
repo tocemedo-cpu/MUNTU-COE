@@ -15,3 +15,9 @@ services:
         generateValue: true
       - key: CRON_SECRET
         generateValue: true
+      # Opcionais — "Recuperar acesso" no login funciona sem eles (nunca
+      # falha), só não envia e-mail de verdade sem RESEND_API_KEY.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false

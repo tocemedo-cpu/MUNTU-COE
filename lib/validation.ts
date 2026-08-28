@@ -18,6 +18,15 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Palavra-passe é obrigatória"),
 });
 
+export const passwordResetRequestSchema = z.object({
+  email: z.string().trim().min(1, "E-mail é obrigatório").email("E-mail inválido"),
+});
+
+export const passwordResetConfirmSchema = z.object({
+  token: z.string().min(1, "Link inválido"),
+  password: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
+});
+
 export const requestCreateSchema = z.object({
   tower: z.string().trim().min(1).max(80).default("Requisition-to-PO"),
   type: z.string().trim().max(80).optional(),
