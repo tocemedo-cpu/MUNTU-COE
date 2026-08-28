@@ -176,26 +176,14 @@ function PublicSite({ onLogin }: { onLogin: () => void }) {
   </div>;
 }
 
-const roleEmails: Record<string, string> = {
-  "Requisitante": "ana.manuel@operadora.ao",
-  "Administrador da empresa": "joao.sebastiao@operadora.ao",
-  "COE Manager": "marta.miguel@muntucoe.ao",
-  "Analista (Buyer/AP)": "sofia.neto@muntucoe.ao",
-  "System Admin": "rui.domingos@muntucoe.ao",
-  "Fornecedor": "carlos.mateus@kwanzaindustrial.ao",
-};
-
 function Login({ onBack, onSuccess, initialError }: { onBack: () => void; onSuccess: (user: AuthUser) => void; initialError?: string }) {
-  const [role, setRole] = useState("Requisitante");
-  const [email, setEmail] = useState(roleEmails["Requisitante"]);
-  const [password, setPassword] = useState("Muntu2026!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [step, setStep] = useState<"email" | "password">("email");
   const [ssoCompanyName, setSsoCompanyName] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { if (initialError) toast.error(initialError); }, [initialError]);
-
-  const changeRole = (value: string) => { setRole(value); setEmail(roleEmails[value] ?? ""); setStep("email"); };
 
   const continueWithEmail = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -240,10 +228,9 @@ function Login({ onBack, onSuccess, initialError }: { onBack: () => void; onSucc
 
   return <main className="login-page">
     <section className="login-visual"><button className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button><Brand inverse /><div className="login-message"><Badge>PORTAL OPERACIONAL</Badge><h1>Todos os pedidos. Todos os intervenientes. Um único fluxo.</h1><p>Acompanhe o trabalho do intake ao pagamento, com SLA, documentação e responsabilidades visíveis.</p><div className="login-stats"><div><strong>96,4%</strong><span>SLA</span></div><div><strong>42</strong><span>pedidos activos</span></div><div><strong>3,2d</strong><span>ciclo médio</span></div></div></div></section>
-    <section className="login-panel"><div className="login-card"><div className="mobile-login-brand"><Brand /></div><p className="kicker">BEM-VINDO DE VOLTA</p><h2>Aceda ao Muntu COE</h2><p className="muted">Use um dos perfis de demonstração, ou o e-mail da sua empresa — o portal decide sozinho se é SSO ou palavra-passe.</p>
+    <section className="login-panel"><div className="login-card"><div className="mobile-login-brand"><Brand /></div><p className="kicker">BEM-VINDO DE VOLTA</p><h2>Aceda ao Muntu COE</h2><p className="muted">Introduza o seu e-mail — o portal identifica automaticamente o seu perfil e decide se é SSO ou palavra-passe.</p>
       {step === "email" && !ssoCompanyName && <form onSubmit={continueWithEmail}>
-        <label>Perfil de demonstração<NativeSelect value={role} onChange={(event) => changeRole(event.target.value)} className="field-control"><NativeSelectOption>Requisitante</NativeSelectOption><NativeSelectOption>Administrador da empresa</NativeSelectOption><NativeSelectOption>COE Manager</NativeSelectOption><NativeSelectOption>Analista (Buyer/AP)</NativeSelectOption><NativeSelectOption>System Admin</NativeSelectOption><NativeSelectOption>Fornecedor</NativeSelectOption></NativeSelect></label>
-        <label>E-mail corporativo<div className="input-with-icon"><Mail /><Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div></label>
+        <label>E-mail corporativo<div className="input-with-icon"><Mail /><Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus /></div></label>
         <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={loading}>{loading ? "A verificar…" : "Continuar"} <ArrowRight /></Button>
       </form>}
       {ssoCompanyName && <div className="wizard-step">
