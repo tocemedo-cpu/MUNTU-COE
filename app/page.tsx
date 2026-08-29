@@ -34,6 +34,7 @@ import {
   Mail,
   Menu,
   Network,
+  Package,
   PackageCheck,
   Pickaxe,
   Plane,
@@ -68,7 +69,7 @@ import { bucketRequestsByMonth, computeAvgCycleDays, computeSlaOnTimePct } from 
 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
-  | "tenders" | "contracts" | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
+  | "tenders" | "contracts" | "catalog" | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
   | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications" | "team";
 
 type RequestItem = {
@@ -573,6 +574,7 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   suppliers: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   tenders: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   contracts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  catalog: ["requester", "company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   pos: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   receipts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   invoices: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
@@ -598,13 +600,13 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
 const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
   { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }, { id: "team", label: "Equipa", icon: UserCog }] },
   { group: "HOMOLOGAÇÃO", items: [{ id: "applications", label: "Candidaturas", icon: Handshake }] },
-  { group: "SOURCING", items: [{ id: "tenders", label: "Tenders (RFQ)", icon: Gavel }, { id: "contracts", label: "Contratos", icon: BriefcaseBusiness }] },
+  { group: "SOURCING", items: [{ id: "tenders", label: "Tenders (RFQ)", icon: Gavel }, { id: "contracts", label: "Contratos", icon: BriefcaseBusiness }, { id: "catalog", label: "Catálogo", icon: Package }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
   { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
   { group: "SUPORTE", items: [{ id: "support", label: "Suporte", icon: LifeBuoy }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", tenders: "Tenders (RFQ)", contracts: "Contratos", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", tenders: "Tenders (RFQ)", contracts: "Contratos", catalog: "Catálogo", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -868,6 +870,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />)}
           {view === "tenders" && <Tenders user={user} suppliersList={suppliersList} />}
           {view === "contracts" && <Contracts user={user} suppliersList={suppliersList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "catalog" && <Catalog user={user} suppliersList={suppliersList} />}
           {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} requests={requests} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
@@ -1842,6 +1845,130 @@ function CreateContractForm({
       <label className="form-field">Fim<Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} required /></label>
       <label className="form-field span-2">Notas (opcional)<Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} /></label>
       <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A registar…" : "Registar contrato"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
+    </form>
+  </section>;
+}
+
+type CatalogItemRow = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  supplier: string;
+  supplierId: number;
+  unitPrice: number;
+  unit: string;
+  active: boolean;
+  createdAt: string;
+};
+
+// Catálogo de fornecedores — itens com preço pré-negociado para alimentar
+// o tipo de transacção "PO catalogado" (tier automático) com dados reais
+// em vez de um valor livre digitado no wizard. Curado só por
+// analyst/coe_manager/system_admin (a Muntu negoceia os preços); qualquer
+// outra pessoa navega em modo só de leitura, só itens activos.
+function Catalog({ user, suppliersList }: { user: AuthUser; suppliersList: Supplier[] }) {
+  const [rows, setRows] = useState<CatalogItemRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const isCurator = user.accessLevel === "analyst" || user.accessLevel === "coe_manager" || user.accessLevel === "system_admin";
+  const isSupplier = user.accessLevel === "supplier";
+
+  const loadRows = async () => {
+    try {
+      const { items } = await api<{ items: CatalogItemRow[] }>("/api/catalog");
+      setRows(items);
+    } catch {
+      toast.error("Não foi possível carregar o catálogo");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRows();
+  }, []);
+
+  const toggleActive = async (item: CatalogItemRow) => {
+    setSavingId(item.id);
+    try {
+      const { item: updated } = await api<{ item: CatalogItemRow }>(`/api/catalog/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ active: !item.active }),
+      });
+      setRows((current) => current.map((row) => (row.id === item.id ? updated : row)));
+    } catch {
+      toast.error("Não foi possível actualizar o item");
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    return rows.filter((row) => [row.name, row.category, row.supplier].some((field) => field.toLowerCase().includes(q)));
+  }, [rows, query]);
+
+  return <><PageHeader kicker="SOURCING" title="Catálogo" description="Itens de fornecedores com preço pré-negociado, para pedidos do tipo &quot;PO catalogado&quot;." action={isCurator ? <Button className="btn-burgundy" onClick={() => setFormOpen((open) => !open)}><Plus /> Novo item</Button> : undefined} />
+    {formOpen && <CreateCatalogItemForm suppliersList={suppliersList} onCreated={(item) => { setRows((current) => [item, ...current]); setFormOpen(false); }} onCancel={() => setFormOpen(false)} />}
+    <div className="catalog-search"><Search /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pesquisar por nome, categoria ou fornecedor…" /></div>
+    <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Categoria</TableHead><TableHead>Fornecedor</TableHead><TableHead>Preço unitário</TableHead>{(isCurator || isSupplier) && <TableHead>Estado</TableHead>}{isCurator && <TableHead className="text-right">Acção</TableHead>}</TableRow></TableHeader><TableBody>{filtered.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong>{row.description && <div className="muted">{row.description}</div>}</TableCell><TableCell>{row.category || "—"}</TableCell><TableCell>{row.supplier}</TableCell><TableCell>{money(row.unitPrice)} / {row.unit}</TableCell>{(isCurator || isSupplier) && <TableCell><span className={row.active ? "status status-green" : "status status-slate"}>{row.active ? "Activo" : "Inactivo"}</span></TableCell>}{isCurator && <TableCell className="text-right"><Button size="sm" variant="outline" disabled={savingId === row.id} onClick={() => toggleActive(row)}>{row.active ? "Desactivar" : "Reactivar"}</Button></TableCell>}</TableRow>)}</TableBody></Table>{!loading && filtered.length === 0 && <div className="empty-state"><Package /><h3>Sem itens no catálogo</h3><p>{isCurator ? "Registe o primeiro item para começar a alimentar o catálogo." : "Ainda não há itens de catálogo disponíveis."}</p></div>}</div></section>
+  </>;
+}
+
+function CreateCatalogItemForm({
+  suppliersList,
+  onCreated,
+  onCancel,
+}: {
+  suppliersList: Supplier[];
+  onCreated: (item: CatalogItemRow) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [category, setCategory] = useState("");
+  const [supplierId, setSupplierId] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [unit, setUnit] = useState("un");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { item } = await api<{ item: CatalogItemRow }>("/api/catalog", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          description: description || undefined,
+          category: category || undefined,
+          supplierId: Number(supplierId),
+          unitPrice: Number(unitPrice),
+          unit: unit || undefined,
+        }),
+      });
+      toast.success(`${item.name} adicionado ao catálogo`);
+      onCreated(item);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível adicionar o item");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section className="panel">
+    <form onSubmit={submit} className="form-grid">
+      <label className="form-field">Nome<Input value={name} onChange={(event) => setName(event.target.value)} required autoFocus /></label>
+      <label className="form-field">Categoria (opcional)<Input value={category} onChange={(event) => setCategory(event.target.value)} /></label>
+      <label className="form-field">Fornecedor<NativeSelect value={supplierId} onChange={(event) => setSupplierId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{suppliersList.map((supplier) => <NativeSelectOption key={supplier.id} value={supplier.id}>{supplier.name}</NativeSelectOption>)}</NativeSelect></label>
+      <label className="form-field">Preço unitário (AOA)<Input type="number" min={0} value={unitPrice} onChange={(event) => setUnitPrice(event.target.value)} required /></label>
+      <label className="form-field">Unidade<Input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="un" /></label>
+      <label className="form-field span-2">Descrição (opcional)<Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} /></label>
+      <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A adicionar…" : "Adicionar ao catálogo"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
     </form>
   </section>;
 }

@@ -192,6 +192,29 @@ export const contracts = pgTable("contracts", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
 });
 
+// Catálogo de fornecedores — item com preço pré-negociado, para alimentar
+// o tipo de transacção "PO catalogado" (tier automático, lib/billing-tiers.ts)
+// com dados reais em vez de um valor livre digitado no wizard. Curado
+// pela Muntu (analyst/coe_manager/system_admin), navegável por qualquer
+// pessoa que crie pedidos.
+export const catalogItems = pgTable("catalog_items", {
+  id: text("id").primaryKey(), // "CAT-2026-####"
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  category: text("category").notNull().default(""),
+  supplier: text("supplier").notNull(),
+  supplierId: bigint("supplier_id", { mode: "number" })
+    .notNull()
+    .references(() => suppliers.id),
+  unitPrice: bigint("unit_price", { mode: "number" }).notNull().default(0),
+  unit: text("unit").notNull().default("un"),
+  active: boolean("active").notNull().default(true),
+  createdByUserId: bigint("created_by_user_id", { mode: "number" })
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
 export const receipts = pgTable("receipts", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
   po: text("po").notNull(),

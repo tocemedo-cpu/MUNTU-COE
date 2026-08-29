@@ -161,6 +161,24 @@ create table if not exists public.contracts (
   created_at timestamptz not null default now()
 );
 
+-- Catálogo de fornecedores — item com preço pré-negociado, para alimentar
+-- o tipo de transacção "PO catalogado" (tier automático) com dados reais.
+-- Curado pela Muntu (analyst/coe_manager/system_admin), navegável por
+-- qualquer pessoa que crie pedidos.
+create table if not exists public.catalog_items (
+  id text primary key, -- "CAT-2026-####"
+  name text not null,
+  description text not null default '',
+  category text not null default '',
+  supplier text not null,
+  supplier_id bigint not null references public.suppliers (id),
+  unit_price bigint not null default 0,
+  unit text not null default 'un',
+  active boolean not null default true,
+  created_by_user_id bigint not null references public.users (id),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.receipts (
   id bigint generated always as identity primary key,
   po text not null,
@@ -401,6 +419,7 @@ alter table public.tenders enable row level security;
 alter table public.tender_invites enable row level security;
 alter table public.bids enable row level security;
 alter table public.contracts enable row level security;
+alter table public.catalog_items enable row level security;
 
 drop policy if exists "public read requests" on public.requests;
 drop policy if exists "public write requests" on public.requests;
@@ -444,9 +463,9 @@ create policy "public write documents" on public.documents for insert with check
 -- `client_invoices`, `client_invoice_lines`, `document_files`,
 -- `support_tickets`, `support_messages`, `applications`,
 -- `consumed_tokens`, `tenders`, `tender_invites`, `bids` (propostas de
--- fornecedores concorrentes nunca podem ficar legíveis por anon key) nem
--- `contracts` (valores e termos contratuais são dados comerciais
--- sensíveis): mantém-nas
+-- fornecedores concorrentes nunca podem ficar legíveis por anon key),
+-- `contracts` nem `catalog_items` (valores, termos contratuais e preços
+-- pré-negociados são dados comerciais sensíveis): mantém-nas
 -- ilegíveis pela API pública/anon key (segredos de SSO, dados financeiros,
 -- dados de candidatos, bytes reais dos
 -- ficheiros carregados e conteúdo de pedidos de suporte dos utilizadores).

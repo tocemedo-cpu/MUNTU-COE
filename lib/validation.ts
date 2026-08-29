@@ -244,3 +244,24 @@ export const contractCreateSchema = z
   });
 
 export const contractActionSchema = z.object({ action: z.literal("terminate") });
+
+export const catalogItemCreateSchema = z.object({
+  name: z.string().trim().min(1, "O nome é obrigatório").max(200),
+  description: z.string().trim().max(2000).optional(),
+  category: z.string().trim().max(120).optional(),
+  supplierId: z.number().int().positive("Indique o fornecedor"),
+  unitPrice: z.number().int().min(0).max(1_000_000_000),
+  unit: z.string().trim().min(1).max(20).optional(),
+});
+
+// Actualização parcial: só os campos presentes mudam — inclui a
+// activação/desactivação (retirar um item do catálogo sem apagar o
+// histórico de POs que já o referenciaram).
+export const catalogItemUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(2000).optional(),
+  category: z.string().trim().max(120).optional(),
+  unitPrice: z.number().int().min(0).max(1_000_000_000).optional(),
+  unit: z.string().trim().min(1).max(20).optional(),
+  active: z.boolean().optional(),
+});

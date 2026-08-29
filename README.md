@@ -207,6 +207,16 @@ Antes disto, um fornecimento continuado (manutenção anual, call-off) não tinh
 - **Documentos** — o contrato em si (PDF assinado, aditamentos) anexa-se pelo mecanismo geral de documentos por entidade (`entityType: "contract"`, `lib/document-access.ts`), com o mesmo âmbito de dono/mesma-empresa/mesmo-fornecedor das outras entidades.
 - **Âmbito de leitura** — um `supplier` só vê os seus próprios contratos, um `company_admin` só os da sua empresa (`GET /api/contracts`) — mesmo padrão de `/api/purchase-orders`.
 
+## Catálogo (preços pré-negociados para "PO catalogado")
+
+O wizard de novo pedido já tinha "PO catalogado" como tipo de transacção (tier automático de facturação, `lib/billing-tiers.ts`) desde uma ronda anterior — mas sem nenhum catálogo real por trás, era só um texto à escolha sem preços nenhuns associados. `catalog_items` (tabela nova) fecha essa lacuna:
+
+- **Curadoria** — só `analyst`/`coe_manager`/`system_admin` registam/editam itens (`POST`/`PATCH /api/catalog[/:id]`) — a empresa cliente e o próprio fornecedor não escolhem o preço pré-negociado, mesma razão por que só a Muntu edita `suppliers.passport`/`risk`.
+- **Navegação** — qualquer pessoa autenticada (`requester` incluído, para consultar preços ao preparar um pedido) vê os itens activos; um `supplier` só vê os seus próprios (activos e inactivos, para saber o que já foi retirado); quem cura vê tudo.
+- **Retirar sem apagar** — `PATCH` com `{ active: false }` desactiva um item (nunca apaga, para não perder o histórico de POs que já o referenciaram) — o ecrã **Catálogo** tem um botão "Desactivar"/"Reactivar" para quem cura.
+
+Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo directamente no wizard de novo pedido (hoje o wizard só tem um campo de valor livre, sem carrinho de itens) — o catálogo já existe como fonte de preços reais, mas ainda não está ligado a essa UI.
+
 ## Rotas de API
 
 | Rota | Métodos | Descrição |
@@ -260,6 +270,8 @@ Antes disto, um fornecimento continuado (manutenção anual, call-off) não tinh
 | `/api/tenders/:id/award` | `POST` | Adjudica uma proposta — marca vencedora/rejeitadas, fecha o tender e gera a PO |
 | `/api/contracts` | `GET`, `POST` | `GET`: lista escopada (fornecedor: só os seus; `company_admin`: só a sua empresa; interno: todos); `POST`: regista um contrato |
 | `/api/contracts/:id` | `GET`, `PATCH` | `GET`: detalhe (mesmo âmbito); `PATCH`: termina antecipadamente um contrato ainda activo |
+| `/api/catalog` | `GET`, `POST` | `GET`: lista escopada (fornecedor: só os seus; interno curador: todos; resto: só activos); `POST`: regista um item (só `analyst`/`coe_manager`/`system_admin`) |
+| `/api/catalog/:id` | `PATCH` | Actualização parcial — nome/descrição/categoria/preço/unidade/activo (só `analyst`/`coe_manager`/`system_admin`) |
 
 Todas as rotas excepto `/api/auth/login`, `/api/auth/logout`, `/api/public-stats` e `/api/applications*` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão. `/api/applications*` é a excepção mista: nunca bloqueia por falta de sessão (o candidato não tem nenhuma), mas continua a autenticar quando existe uma — ver secção "Candidaturas e homologação" acima.
 
