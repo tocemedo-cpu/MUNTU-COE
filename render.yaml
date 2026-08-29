@@ -4,7 +4,12 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm ci && npm run build
+    # db:apply-schema corre supabase/schema.sql (idempotente) antes do
+    # arranque — a produção já ficou atrás do código real três vezes por
+    # este passo ser só manual (colar no SQL Editor do Supabase). Sem
+    # DATABASE_URL definida ainda (primeiro deploy antes de a configurar),
+    # o script avisa e sai sem falhar o build.
+    buildCommand: npm ci && npm run db:apply-schema && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_VERSION

@@ -229,10 +229,12 @@ Este repositório inclui um `render.yaml` (Render Blueprint).
 
 1. No dashboard do Render: **New → Blueprint**, aponte para este repositório GitHub (`tocemedo-cpu/MUNTU-COE`).
 2. O Render lê o `render.yaml` e propõe um Web Service Node com:
-   - `buildCommand`: `npm ci && npm run build`
+   - `buildCommand`: `npm ci && npm run db:apply-schema && npm run build`
    - `startCommand`: `npm run start` (liga-se à porta `$PORT` fornecida pelo Render)
 3. **Antes de confirmar o deploy**, preencha a variável de ambiente `DATABASE_URL` (connection string do Supabase, a mesma usada localmente). É necessária **no build**, não só em runtime — as rotas de API são analisadas durante `next build`, por isso um build sem `DATABASE_URL` falha logo com um erro claro.
 4. Deploy. Não é preciso disco persistente — os dados vivem no Supabase, não no Render.
+
+**`npm run db:apply-schema`** (`scripts/apply-schema.ts`) aplica `supabase/schema.sql` à base de dados de `DATABASE_URL` em cada deploy — sem isto, produção ficava atrás do código real sempre que uma tabela/coluna nova era adicionada (aconteceu três vezes: `support_tickets`, `documents.entity_type`/`entity_id`, `applications`), porque colar o ficheiro no SQL Editor do Supabase era um passo manual, fácil de esquecer. Seguro de correr em todos os deploys: o próprio `schema.sql` só usa `create table if not exists`/`add column if not exists`/`drop policy if exists`, por isso reaplicá-lo nunca apaga nem duplica nada — só cria o que ainda falta. Sem `DATABASE_URL` definida (ex.: primeiro deploy antes de a configurar), o script avisa e sai sem falhar o build.
 
 Alternativa sem Blueprint: criar manualmente um **Web Service** em Render → ligar o repositório → *Environment*: Node → *Build Command*: `npm ci && npm run build` → *Start Command*: `npm run start` → adicionar `DATABASE_URL` nas *Environment Variables*.
 

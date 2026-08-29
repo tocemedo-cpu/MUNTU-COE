@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx db/seed.ts",
+    "db:apply-schema": "tsx scripts/apply-schema.ts",
     "create-owner-admins": "tsx scripts/create-owner-admins.ts",
     "test": "vitest run",
     "test:integration": "DATABASE_URL=\"postgres://postgres:postgres@127.0.0.1:5432/muntu_test?sslmode=disable\" vitest run --config vitest.integration.config.ts"
