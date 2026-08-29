@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { getDb } from "@/db";
-import { exceptions, invoices, purchaseOrders, receipts, requests } from "@/db/schema";
+import { contracts, exceptions, invoices, purchaseOrders, receipts, requests } from "@/db/schema";
 import type { RequestSession } from "./authz";
 
 export const DOCUMENT_ENTITY_TYPES = [
@@ -11,6 +11,7 @@ export const DOCUMENT_ENTITY_TYPES = [
   "exception",
   "purchase_order",
   "application",
+  "contract",
 ] as const;
 export type DocumentEntityType = (typeof DOCUMENT_ENTITY_TYPES)[number];
 
@@ -71,6 +72,13 @@ export async function canAccessDocumentEntity(
     case "exception": {
       const [row] = await db.select().from(exceptions).where(eq(exceptions.id, entityId));
       if (!row) return false;
+      if (session.accessLevel === "company_admin") return row.companyId === session.companyId;
+      return session.accessLevel === "analyst";
+    }
+    case "contract": {
+      const [row] = await db.select().from(contracts).where(eq(contracts.id, entityId));
+      if (!row) return false;
+      if (session.accessLevel === "supplier") return row.supplierId === session.supplierId;
       if (session.accessLevel === "company_admin") return row.companyId === session.companyId;
       return session.accessLevel === "analyst";
     }

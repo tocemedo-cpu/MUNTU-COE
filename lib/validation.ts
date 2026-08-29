@@ -223,3 +223,24 @@ export const bidCreateSchema = z.object({
 export const tenderAwardSchema = z.object({
   bidId: z.number().int().positive(),
 });
+
+// Contratos/Call-off — mesma regra de âmbito que tenderCreateSchema:
+// companyId só é usado (e obrigatório) quando quem cria não tem empresa
+// própria na sessão; para um company_admin vem sempre da sessão.
+export const contractCreateSchema = z
+  .object({
+    title: z.string().trim().min(1, "O título é obrigatório").max(200),
+    supplierId: z.number().int().positive("Indique o fornecedor"),
+    companyId: z.number().int().positive().optional(),
+    requestId: z.string().trim().max(40).optional(),
+    value: z.number().int().min(0).max(1_000_000_000_000),
+    startDate: z.string().trim().min(1, "Indique a data de início"),
+    endDate: z.string().trim().min(1, "Indique a data de fim"),
+    notes: z.string().trim().max(2000).optional(),
+  })
+  .refine((data) => new Date(data.endDate) > new Date(data.startDate), {
+    message: "A data de fim tem de ser posterior à data de início",
+    path: ["endDate"],
+  });
+
+export const contractActionSchema = z.object({ action: z.literal("terminate") });

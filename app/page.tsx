@@ -68,7 +68,7 @@ import { bucketRequestsByMonth, computeAvgCycleDays, computeSlaOnTimePct } from 
 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
-  | "tenders" | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
+  | "tenders" | "contracts" | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
   | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications" | "team";
 
 type RequestItem = {
@@ -572,6 +572,7 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   approvals: ["company_admin", "coe_manager", "system_admin"],
   suppliers: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   tenders: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  contracts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   pos: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   receipts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   invoices: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
@@ -597,13 +598,13 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
 const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
   { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }, { id: "team", label: "Equipa", icon: UserCog }] },
   { group: "HOMOLOGAÇÃO", items: [{ id: "applications", label: "Candidaturas", icon: Handshake }] },
-  { group: "SOURCING", items: [{ id: "tenders", label: "Tenders (RFQ)", icon: Gavel }] },
+  { group: "SOURCING", items: [{ id: "tenders", label: "Tenders (RFQ)", icon: Gavel }, { id: "contracts", label: "Contratos", icon: BriefcaseBusiness }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
   { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
   { group: "SUPORTE", items: [{ id: "support", label: "Suporte", icon: LifeBuoy }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", tenders: "Tenders (RFQ)", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", tenders: "Tenders (RFQ)", contracts: "Contratos", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -866,6 +867,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "approvals" && <Approvals requests={requests.filter((item) => item.status === "Aprovação")} onAction={actOnRequest} onSelect={setSelectedRequest} />}
           {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />)}
           {view === "tenders" && <Tenders user={user} suppliersList={suppliersList} />}
+          {view === "contracts" && <Contracts user={user} suppliersList={suppliersList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} requests={requests} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
@@ -1664,6 +1666,182 @@ function CreateTenderForm({
       {needsCompany && <label className="form-field">Empresa<NativeSelect value={companyId} onChange={(event) => setCompanyId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{companyOptions.map((company) => <NativeSelectOption key={company.id} value={company.id}>{company.name}</NativeSelectOption>)}</NativeSelect></label>}
       <div className="form-field"><span>Fornecedores a convidar</span><div className="checkbox-list">{suppliersList.map((supplier) => <label key={supplier.id}><input type="checkbox" checked={supplierIds.includes(supplier.id)} onChange={() => toggleSupplier(supplier.id)} /> {supplier.name}</label>)}</div></div>
       <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A abrir…" : "Abrir tender"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
+    </form>
+  </section>;
+}
+
+type ContractStatus = "activo" | "terminado";
+type ContractRow = {
+  id: string;
+  title: string;
+  supplier: string;
+  supplierId: number | null;
+  companyId: number;
+  requestId: string | null;
+  value: number;
+  startDate: string;
+  endDate: string;
+  notes: string;
+  status: ContractStatus;
+  createdAt: string;
+};
+
+// "A expirar"/"Expirado" nunca vêm da base de dados — são sempre
+// calculados a partir de endDate a cada render, para nunca ficarem
+// desactualizados (mesmo princípio da linha temporal da PO: derivado, não
+// fabricado). Só "Activo"/"Terminado" reflectem o que foi gravado.
+function contractDisplay(contract: ContractRow): { label: string; className: string } {
+  if (contract.status === "terminado") return { label: "Terminado", className: "status status-slate" };
+  const daysLeft = (new Date(contract.endDate).getTime() - Date.now()) / 86_400_000;
+  if (daysLeft < 0) return { label: "Expirado", className: "status status-red" };
+  if (daysLeft < 30) return { label: "A expirar", className: "status status-amber" };
+  return { label: "Activo", className: "status status-green" };
+}
+
+// Contratos/Call-off — acordos com validade e tecto de valor, distintos
+// de uma PO pontual. Mesma limitação de âmbito de criação que Tenders:
+// company_admin (empresa da sessão) e system_admin (escolhe a empresa);
+// analyst/coe_manager já gerem contratos existentes, sem selector de
+// empresa no ecrã ainda para abrir um novo.
+function Contracts({
+  user,
+  suppliersList,
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  user: AuthUser;
+  suppliersList: Supplier[];
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
+  const [rows, setRows] = useState<ContractRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+  const [selected, setSelected] = useState<ContractRow | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const isSupplier = user.accessLevel === "supplier";
+  const canCreate = user.accessLevel === "company_admin" || user.accessLevel === "system_admin";
+  const canManage = !isSupplier;
+
+  const loadRows = async () => {
+    try {
+      const { contracts: list } = await api<{ contracts: ContractRow[] }>("/api/contracts");
+      setRows(list);
+    } catch {
+      toast.error("Não foi possível carregar os contratos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRows();
+  }, []);
+
+  const terminate = async (id: string) => {
+    setBusy(true);
+    try {
+      const { contract } = await api<{ contract: ContractRow }>(`/api/contracts/${id}`, { method: "PATCH", body: JSON.stringify({ action: "terminate" }) });
+      setRows((current) => current.map((row) => (row.id === id ? contract : row)));
+      setSelected(contract);
+      toast.success("Contrato terminado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível terminar o contrato");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <><PageHeader kicker="SOURCING" title="Contratos" description="Acordos com fornecedores, validade e tecto de valor — distintos de uma PO pontual." action={canCreate ? <Button className="btn-burgundy" onClick={() => setFormOpen((open) => !open)}><Plus /> Novo contrato</Button> : undefined} />
+    {formOpen && <CreateContractForm user={user} suppliersList={suppliersList} onCreated={(contract) => { setRows((current) => [contract, ...current]); setFormOpen(false); }} onCancel={() => setFormOpen(false)} />}
+    <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Contrato</TableHead><TableHead>Título</TableHead><TableHead>Fornecedor</TableHead><TableHead>Validade</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Acção</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => { const display = contractDisplay(row); return <TableRow key={row.id}><TableCell><button className="request-link" onClick={() => setSelected(row)}><strong>{row.id}</strong></button></TableCell><TableCell>{row.title}</TableCell><TableCell>{row.supplier}</TableCell><TableCell>{new Date(row.startDate).toLocaleDateString("pt-PT")} — {new Date(row.endDate).toLocaleDateString("pt-PT")}</TableCell><TableCell><span className={display.className}>{display.label}</span></TableCell><TableCell className="text-right"><Button size="icon-sm" variant="ghost" onClick={() => setSelected(row)} aria-label={`Abrir ${row.id}`}><Eye /></Button></TableCell></TableRow>; })}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><BriefcaseBusiness /><h3>Sem contratos ainda</h3><p>{isSupplier ? "Ainda sem contratos associados à sua empresa." : "Registe o primeiro contrato com um fornecedor."}</p></div>}</div></section>
+    <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
+      <SheetContent className="request-sheet sm:max-w-xl">
+        {selected && <div className="request-detail">
+          <SheetHeader><SheetTitle>{selected.title}</SheetTitle><SheetDescription>{selected.id} — {selected.supplier}</SheetDescription></SheetHeader>
+          <span className={contractDisplay(selected).className}>{contractDisplay(selected).label}</span>
+          <div><p className="muted">Validade</p><p>{new Date(selected.startDate).toLocaleDateString("pt-PT")} — {new Date(selected.endDate).toLocaleDateString("pt-PT")}</p></div>
+          <div><p className="muted">Valor do contrato</p><p><strong>{money(selected.value)}</strong></p></div>
+          {selected.notes && <div><p className="muted">Notas</p><p>{selected.notes}</p></div>}
+          <EntityDocuments entityType="contract" entityId={selected.id} title="Documentos do contrato" onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
+          {canManage && selected.status === "activo" && <Button variant="outline" disabled={busy} onClick={() => terminate(selected.id)}>Terminar contrato</Button>}
+        </div>}
+      </SheetContent>
+    </Sheet>
+  </>;
+}
+
+function CreateContractForm({
+  user,
+  suppliersList,
+  onCreated,
+  onCancel,
+}: {
+  user: AuthUser;
+  suppliersList: Supplier[];
+  onCreated: (contract: ContractRow) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [supplierId, setSupplierId] = useState("");
+  const [value, setValue] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const needsCompany = user.accessLevel === "system_admin";
+
+  useEffect(() => {
+    if (!needsCompany) return;
+    (async () => {
+      try {
+        const { companies } = await api<{ companies: CompanyOption[] }>("/api/admin/companies");
+        setCompanyOptions(companies);
+      } catch {
+        toast.error("Não foi possível carregar as empresas");
+      }
+    })();
+  }, [needsCompany]);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { contract } = await api<{ contract: ContractRow }>("/api/contracts", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          supplierId: Number(supplierId),
+          value: Number(value),
+          startDate: new Date(startDate).toISOString(),
+          endDate: new Date(endDate).toISOString(),
+          notes: notes || undefined,
+          companyId: needsCompany && companyId ? Number(companyId) : undefined,
+        }),
+      });
+      toast.success(`${contract.id} registado`);
+      onCreated(contract);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível registar o contrato");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section className="panel">
+    <form onSubmit={submit} className="form-grid">
+      <label className="form-field">Título<Input value={title} onChange={(event) => setTitle(event.target.value)} required autoFocus /></label>
+      <label className="form-field">Fornecedor<NativeSelect value={supplierId} onChange={(event) => setSupplierId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{suppliersList.map((supplier) => <NativeSelectOption key={supplier.id} value={supplier.id}>{supplier.name}</NativeSelectOption>)}</NativeSelect></label>
+      <label className="form-field">Valor do contrato (AOA)<Input type="number" min={0} value={value} onChange={(event) => setValue(event.target.value)} required /></label>
+      {needsCompany && <label className="form-field">Empresa<NativeSelect value={companyId} onChange={(event) => setCompanyId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{companyOptions.map((company) => <NativeSelectOption key={company.id} value={company.id}>{company.name}</NativeSelectOption>)}</NativeSelect></label>}
+      <label className="form-field">Início<Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} required /></label>
+      <label className="form-field">Fim<Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} required /></label>
+      <label className="form-field span-2">Notas (opcional)<Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={2} /></label>
+      <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A registar…" : "Registar contrato"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
     </form>
   </section>;
 }

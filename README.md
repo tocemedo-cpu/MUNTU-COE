@@ -198,6 +198,15 @@ Até aqui, uma PO só nascia de um pedido já aprovado (`PATCH /api/requests/:id
 
 `middleware.ts` ganhou `{ prefix: "/api/tenders", allow: [...] }` incluindo `supplier` — o âmbito real (só os tenders para que foi convidado, nunca a lista completa de sourcing de outra empresa) é feito no próprio handler, não pelo prefixo.
 
+## Contratos (acordos com validade, distintos de uma PO pontual)
+
+Antes disto, um fornecimento continuado (manutenção anual, call-off) não tinha nenhuma forma de ser registado como tal — só existiam POs pontuais, sem noção de vigência nem tecto de valor. `contracts` (tabela nova) fecha essa lacuna, ligada ao mesmo fornecedor/empresa das restantes entidades:
+
+- **Registar** — `POST /api/contracts` (ecrã **Contratos**, `company_admin`/`analyst`/`coe_manager`/`system_admin`), com fornecedor, valor, data de início e fim (a de fim tem sempre de ser posterior à de início). Mesma limitação de âmbito de criação que Tenders: `company_admin` (empresa da sessão) e `system_admin` (escolhe a empresa) têm uma fonte clara de `companyId` no ecrã; `analyst`/`coe_manager` já conseguem gerir/terminar contratos existentes pela API, sem selector de empresa no ecrã ainda para registar um novo.
+- **Estado** — só `activo`/`terminado` são gravados (`PATCH /api/contracts/:id` com `action: "terminate"`, terminação antecipada por uma pessoa). "A expirar" (menos de 30 dias) e "Expirado" **nunca** são gravados — são sempre calculados a partir de `end_date` no frontend (`contractDisplay`, mesmo princípio já usado na linha temporal da PO: derivado, não fabricado, para nunca ficar desactualizado).
+- **Documentos** — o contrato em si (PDF assinado, aditamentos) anexa-se pelo mecanismo geral de documentos por entidade (`entityType: "contract"`, `lib/document-access.ts`), com o mesmo âmbito de dono/mesma-empresa/mesmo-fornecedor das outras entidades.
+- **Âmbito de leitura** — um `supplier` só vê os seus próprios contratos, um `company_admin` só os da sua empresa (`GET /api/contracts`) — mesmo padrão de `/api/purchase-orders`.
+
 ## Rotas de API
 
 | Rota | Métodos | Descrição |
@@ -249,6 +258,8 @@ Até aqui, uma PO só nascia de um pedido já aprovado (`PATCH /api/requests/:id
 | `/api/tenders/:id` | `GET`, `PATCH` | `GET`: detalhe — todas as propostas para o comprador, só a própria para um fornecedor; `PATCH`: cancela um tender ainda aberto |
 | `/api/tenders/:id/bids` | `POST` | Submete/actualiza a proposta do próprio fornecedor convidado (upsert) |
 | `/api/tenders/:id/award` | `POST` | Adjudica uma proposta — marca vencedora/rejeitadas, fecha o tender e gera a PO |
+| `/api/contracts` | `GET`, `POST` | `GET`: lista escopada (fornecedor: só os seus; `company_admin`: só a sua empresa; interno: todos); `POST`: regista um contrato |
+| `/api/contracts/:id` | `GET`, `PATCH` | `GET`: detalhe (mesmo âmbito); `PATCH`: termina antecipadamente um contrato ainda activo |
 
 Todas as rotas excepto `/api/auth/login`, `/api/auth/logout`, `/api/public-stats` e `/api/applications*` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão. `/api/applications*` é a excepção mista: nunca bloqueia por falta de sessão (o candidato não tem nenhuma), mas continua a autenticar quando existe uma — ver secção "Candidaturas e homologação" acima.
 

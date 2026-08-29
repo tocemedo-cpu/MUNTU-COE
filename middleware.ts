@@ -52,6 +52,7 @@ const ROUTE_ACCESS: { prefix: string; allow: AccessLevel[] }[] = [
   // próprias oportunidades; o âmbito por convite/empresa é feito no
   // handler (nunca a lista completa de tenders de outra empresa/fornecedor).
   { prefix: "/api/tenders", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
+  { prefix: "/api/contracts", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
   // Equipa da própria empresa (convidar/listar colegas) — só o
   // Administrador da empresa, nunca outro nível. O âmbito por empresa em
   // si (nunca ver/convidar para outra empresa) é feito no handler a

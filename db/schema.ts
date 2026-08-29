@@ -166,6 +166,32 @@ export const bids = pgTable(
   (table) => [uniqueIndex("bids_tender_supplier_idx").on(table.tenderId, table.supplierId)]
 );
 
+// Contrato/Call-off — acordo com validade e tecto de valor, distinto de
+// uma PO pontual. O estado "activo"/"terminado" só regista o que uma
+// pessoa decidiu (terminar antecipadamente); "a expirar"/"expirado" nunca
+// são gravados — são sempre calculados a partir de endDate, para nunca
+// ficarem desactualizados (mesmo princípio já usado na linha temporal da
+// PO: derivado, não fabricado).
+export const contracts = pgTable("contracts", {
+  id: text("id").primaryKey(), // "CTR-2026-####"
+  title: text("title").notNull(),
+  supplier: text("supplier").notNull(),
+  supplierId: bigint("supplier_id", { mode: "number" }).references(() => suppliers.id),
+  companyId: bigint("company_id", { mode: "number" })
+    .notNull()
+    .references(() => companies.id),
+  requestId: text("request_id").references(() => requests.id),
+  value: bigint("value", { mode: "number" }).notNull().default(0),
+  startDate: timestamp("start_date", { withTimezone: true }).notNull(),
+  endDate: timestamp("end_date", { withTimezone: true }).notNull(),
+  notes: text("notes").notNull().default(""),
+  status: text("status").notNull().default("activo"), // activo | terminado
+  createdByUserId: bigint("created_by_user_id", { mode: "number" })
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
 export const receipts = pgTable("receipts", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
   po: text("po").notNull(),
