@@ -1,8 +1,8 @@
 import { eq } from "drizzle-orm";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb, jsonRequest, uniqueDomain } from "./helpers";
 import { seedIfEmpty } from "@/db/seed-data";
-import { clientInvoiceLines, companies, invoices, purchaseOrders } from "@/db/schema";
+import { clientInvoiceLines, clientInvoices, companies, invoices, purchaseOrders } from "@/db/schema";
 import { POST as generateBilling } from "@/app/api/admin/billing/route";
 
 describe("POST /api/admin/billing (gerar factura de cliente)", () => {
@@ -96,5 +96,56 @@ describe("POST /api/admin/billing (gerar factura de cliente)", () => {
       })
     );
     expect(response.status).toBe(404);
+  });
+
+  // insertClientInvoiceWithGeneratedId (lib/billing.ts) substituiu um id
+  // baseado em COUNT(*) — que colidia assim que a tabela tinha qualquer
+  // linha fora dessa sequência, e não era seguro sob chamadas concorrentes
+  // — pela mesma estratégia de sorteio-com-nova-tentativa já usada para
+  // pedidos, tickets de suporte, candidaturas e POs (ver
+  // tests/integration/id-collision-retry.test.ts). Este teste força uma
+  // colisão real (Math.random rigged) para garantir que a nova tentativa
+  // dispara de verdade.
+  it("retries when the generated client-invoice id collides with an existing one", async () => {
+    const db = getDb();
+    const [company] = await db
+      .insert(companies)
+      .values({ name: "Cliente Colisão", domain: uniqueDomain("billing-collision"), retainerAmount: 50_000 })
+      .returning();
+
+    const year = new Date().getFullYear();
+    const riggedId = `COB-${year}-1000`;
+    await db.insert(clientInvoices).values({
+      id: riggedId,
+      companyId: company.id,
+      periodStart: "2026-01-01",
+      periodEnd: "2026-01-31",
+      scope: "total",
+      status: "pendente_aprovacao",
+      generatedBy: "manual",
+      retainerAmount: 0,
+      poAmount: 0,
+      invoiceAmount: 0,
+      totalAmount: 0,
+    });
+
+    let call = 0;
+    const spy = vi.spyOn(Math, "random").mockImplementation(() => (call++ === 0 ? 0 : 0.5));
+
+    const periodStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const periodEnd = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const response = await generateBilling(
+      jsonRequest("http://localhost/api/admin/billing", {
+        method: "POST",
+        session: { userId: 1, accessLevel: "system_admin" },
+        body: { companyId: company.id, periodStart, periodEnd, scope: "total" },
+      })
+    );
+    spy.mockRestore();
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.clientInvoice.id).not.toBe(riggedId);
   });
 });

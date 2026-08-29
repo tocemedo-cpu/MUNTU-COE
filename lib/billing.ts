@@ -1,6 +1,7 @@
 import { and, eq, gte, lte } from "drizzle-orm";
 import { getDb } from "@/db";
 import { billingRates, clientInvoiceLines, clientInvoices, companies, invoices, purchaseOrders } from "@/db/schema";
+import { isUniqueViolation } from "./db-errors";
 
 export { classifyPoTier, classifyInvoiceTier, type PoTier, type InvoiceTier } from "./billing-tiers";
 
@@ -89,29 +90,43 @@ export async function generateClientInvoice(params: {
   const invoiceAmount = sum("invoice");
   const totalAmount = retainerAmount + poAmount + invoiceAmount;
 
-  const count = (await db.select().from(clientInvoices)).length;
-  const id = `COB-${new Date().getFullYear()}-${String(1000 + count).padStart(4, "0")}`;
-
-  const [created] = await db
-    .insert(clientInvoices)
-    .values({
-      id,
-      companyId: params.companyId,
-      periodStart: params.periodStart,
-      periodEnd: params.periodEnd,
-      scope: params.scope,
-      status: "pendente_aprovacao",
-      generatedBy: params.generatedBy,
-      retainerAmount,
-      poAmount,
-      invoiceAmount,
-      totalAmount,
-    })
-    .returning();
+  const created = await insertClientInvoiceWithGeneratedId(db, {
+    companyId: params.companyId,
+    periodStart: params.periodStart,
+    periodEnd: params.periodEnd,
+    scope: params.scope,
+    status: "pendente_aprovacao",
+    generatedBy: params.generatedBy,
+    retainerAmount,
+    poAmount,
+    invoiceAmount,
+    totalAmount,
+  });
 
   if (lines.length) {
-    await db.insert(clientInvoiceLines).values(lines.map((line) => ({ ...line, clientInvoiceId: id })));
+    await db.insert(clientInvoiceLines).values(lines.map((line) => ({ ...line, clientInvoiceId: created.id })));
   }
 
   return created;
+}
+
+type NewClientInvoiceValues = Omit<typeof clientInvoices.$inferInsert, "id">;
+
+// Um id baseado em COUNT(*) colide assim que a tabela tem qualquer linha
+// fora dessa sequência (dados semeados, facturas apagadas, ou a mesma
+// contagem lida por duas chamadas concorrentes — ex.: o cron mensal a
+// gerar facturas para várias empresas ao mesmo tempo) — mesma classe de
+// bug já corrigida para pedidos, tickets de suporte, candidaturas e POs.
+// Sorteia um id e só volta a tentar no caso raro de colisão real.
+async function insertClientInvoiceWithGeneratedId(db: Db, values: NewClientInvoiceValues) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const id = `COB-${new Date().getFullYear()}-${1000 + Math.floor(Math.random() * 9000)}`;
+    try {
+      const [created] = await db.insert(clientInvoices).values({ id, ...values }).returning();
+      return created;
+    } catch (error) {
+      if (!isUniqueViolation(error) || attempt === 4) throw error;
+    }
+  }
+  throw new Error("Não foi possível gerar um id de factura de cliente único");
 }
