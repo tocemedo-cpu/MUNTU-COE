@@ -16,8 +16,8 @@ services:
       - key: CRON_SECRET
         generateValue: true
       # Opcionais — "Recuperar acesso" no login funciona sem eles (nunca
-      # falha), só não envia e-mail de verdade sem RESEND_API_KEY.
-      - key: RESEND_API_KEY
+      # falha), só não envia e-mail de verdade sem as duas definidas.
+      - key: BREVO_API_KEY
         sync: false
-      - key: RESEND_FROM_EMAIL
+      - key: BREVO_FROM_EMAIL
         sync: false
