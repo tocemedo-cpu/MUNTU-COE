@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { purchaseOrders, requests } from "@/db/schema";
+import { purchaseOrders, requests, suppliers } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { classifyPoTier } from "@/lib/billing";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { checkSupplierRiskBlock } from "@/lib/risk-block";
 import { parseJsonBody, requestActionSchema } from "@/lib/validation";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -33,6 +34,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!existing) return Response.json({ error: "Pedido não encontrado" }, { status: 404 });
 
   const approve = parsed.data.action === "approve";
+  const session = getSession(request);
+
+  // Aprovar um pedido de um fornecedor de risco "Alto" fica bloqueado por
+  // omissão — ver lib/risk-block.ts. Verificado antes de decidir nada:
+  // um pedido bloqueado tem de continuar por decidir, não ficar
+  // "aprovado" sem PO nenhuma.
+  let riskOverriddenByUserId: number | null = null;
+  if (approve) {
+    const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, existing.supplier));
+    if (supplierRow) {
+      const riskCheck = checkSupplierRiskBlock({ risk: supplierRow.risk, accessLevel: session.accessLevel, overrideRisk: parsed.data.overrideRisk });
+      if (riskCheck.blocked) {
+        return Response.json({ error: riskCheck.reason, riskBlock: true, canOverride: riskCheck.canOverride }, { status: 409 });
+      }
+      if (parsed.data.overrideRisk) riskOverriddenByUserId = session.userId;
+    }
+  }
+
   const [updated] = await db
     .update(requests)
     .set({
@@ -59,6 +78,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         requestId: existing.id,
         companyId: existing.companyId,
         tier: classifyPoTier(existing.type),
+        riskOverriddenByUserId,
+        riskOverriddenAt: riskOverriddenByUserId ? new Date() : null,
       });
     }
   }

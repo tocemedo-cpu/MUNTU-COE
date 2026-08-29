@@ -103,6 +103,15 @@ export const purchaseOrders = pgTable("purchase_orders", {
   // automatico | standard | complexo — ver lib/billing.ts
   tier: text("tier").notNull().default("standard"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  // Preenchidos só quando a PO foi gerada para um fornecedor de risco
+  // "Alto" (bloqueado por omissão — ver /api/requests/:id e
+  // /api/tenders/:id/award) e alguém da Muntu decidiu aprovar mesmo
+  // assim. Nulo é o caso normal (fornecedor sem risco alto, ou nunca
+  // chegou a este ponto). Também é o que impede /api/admin/payment-
+  // release/run de libertar automaticamente um pagamento com exposição a
+  // risco alto por resolver.
+  riskOverriddenByUserId: bigint("risk_overridden_by_user_id", { mode: "number" }).references(() => users.id),
+  riskOverriddenAt: timestamp("risk_overridden_at", { withTimezone: true }),
 });
 
 // Tender/Sourcing (RFQ) — pedido de cotação a vários fornecedores
@@ -277,6 +286,11 @@ export const paymentBatches = pgTable("payment_batches", {
   status: text("status").notNull().default("Pronto"),
   released: boolean("released").notNull().default(false),
   companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
+  // Preenchido só quando /api/admin/payment-release/run libertou o lote
+  // sozinho (empresa sem excepções por resolver nem exposição a risco
+  // alto por resolver) — distingue de uma libertação manual
+  // (PATCH /api/payments/:id), que nunca preenche isto.
+  autoReleasedAt: timestamp("auto_released_at", { withTimezone: true }),
 });
 
 // Tabelas de preço por unidade (Estudo de Viabilidade §32.4/53.1 —

@@ -218,6 +218,14 @@ Em cada corrida:
 
 `sla_alerted_at`/`sla_escalated_at` (colunas novas em `requests`/`support_tickets`) existem só para este controlo de "já enviado" — nunca são lidos como estado de negócio fora desta rota, mesma disciplina de `consumed_tokens` para tokens de uso único.
 
+## Bloqueio por risco alto + libertação automática de pagamento
+
+Duas automações ligadas pelo mesmo sinal real: `suppliers.risk`.
+
+**Bloqueio por risco alto** (`lib/risk-block.ts`) — os dois únicos pontos reais onde uma PO nasce (aprovar um pedido, `PATCH /api/requests/:id`; adjudicar um tender, `POST /api/tenders/:id/award`) passam a verificar o risco do fornecedor antes de gerar a PO. Um fornecedor `risk = "Alto"` bloqueia por omissão (`409`, corpo `{ riskBlock: true, canOverride }`) — `company_admin` nunca consegue avançar, mesmo tentando `overrideRisk`; só `coe_manager`/`system_admin` conseguem, mandando `overrideRisk: true` explicitamente (o ecrã oferece isto como uma confirmação — "Fornecedor de risco alto — aprovar/adjudicar mesmo assim?" — só a quem tem a opção). A PO resultante grava `risk_overridden_by_user_id`/`risk_overridden_at` quando isto acontece — nulo é sempre o caso normal.
+
+**Libertação automática de pagamento** — `POST /api/admin/payment-release/run`, mesmo padrão de agendador externo com `CRON_SECRET` das duas automações acima. Um lote de pagamento (`payment_batches`) ainda por libertar só é libertado sozinho (`released: true`, `auto_released_at`) quando a empresa dele não tem nenhum sinal real de problema por resolver: zero excepções abertas (`exceptions.resolved = false`) e nenhuma PO gerada para um fornecedor de risco alto sem override registado. Havendo qualquer um dos dois, o lote fica como estava — só a libertação manual (`PATCH /api/payments/:id`) continua disponível, porque decidir libertar apesar do problema é sempre uma decisão humana.
+
 ## Catálogo (preços pré-negociados para "PO catalogado")
 
 O wizard de novo pedido já tinha "PO catalogado" como tipo de transacção (tier automático de facturação, `lib/billing-tiers.ts`) desde uma ronda anterior — mas sem nenhum catálogo real por trás, era só um texto à escolha sem preços nenhuns associados. `catalog_items` (tabela nova) fecha essa lacuna:
@@ -264,6 +272,7 @@ Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo
 | `/api/admin/billing/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar/enviar à contabilidade (só `system_admin`) |
 | `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |
 | `/api/admin/sla-alerts/run` | `POST` | Alertas de SLA vencido + escalonamento — autenticada por `CRON_SECRET`, não por sessão |
+| `/api/admin/payment-release/run` | `POST` | Liberta automaticamente lotes de pagamento sem excepções/risco por resolver — autenticada por `CRON_SECRET`, não por sessão |
 | `/api/admin/billing-rates` | `GET` | Lista as tarifas de facturação (só `system_admin`) |
 | `/api/admin/billing-rates/:key` | `PATCH` | Actualiza o valor de uma tarifa (só `system_admin`) |
 | `/api/support` | `GET`, `POST` | Pedidos de suporte — `GET` lista os próprios (todos para `system_admin`); `POST` abre um pedido com mensagem inicial |
@@ -302,7 +311,7 @@ Este repositório inclui um `render.yaml` (Render Blueprint).
 
 Alternativa sem Blueprint: criar manualmente um **Web Service** em Render → ligar o repositório → *Environment*: Node → *Build Command*: `npm ci && npm run build` → *Start Command*: `npm run start` → adicionar `DATABASE_URL` nas *Environment Variables*.
 
-**Agendamento externo:** o Web Service por si só não corre `POST /api/admin/billing/generate-monthly` nem `POST /api/admin/sla-alerts/run` — as duas precisam de um agendador externo (Render Cron Job num plano pago, GitHub Actions, cron-job.org, ...) a chamá-las periodicamente com o header `x-cron-secret: <CRON_SECRET>` (o mesmo valor gerado pelo Blueprint em `render.yaml`).
+**Agendamento externo:** o Web Service por si só não corre `POST /api/admin/billing/generate-monthly`, `POST /api/admin/sla-alerts/run` nem `POST /api/admin/payment-release/run` — as três precisam de um agendador externo (Render Cron Job num plano pago, GitHub Actions, cron-job.org, ...) a chamá-las periodicamente com o header `x-cron-secret: <CRON_SECRET>` (o mesmo valor gerado pelo Blueprint em `render.yaml`).
 
 ## Base de dados
 

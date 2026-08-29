@@ -366,3 +366,111 @@ describe("PATCH /api/tenders/:id (cancel)", () => {
     expect(cancelledBody.tender.status).toBe("cancelado");
   });
 });
+
+// Bloqueio por risco alto (lib/risk-block.ts) — mesma regra da aprovação
+// de um pedido, aqui aplicada à adjudicação de uma proposta.
+describe("POST /api/tenders/:id/award — bloqueio por risco alto", () => {
+  it("blocks a company_admin outright, even trying overrideRisk, without touching the tender", async () => {
+    const company = await makeCompany();
+    const buyer = await makeBuyer(company.id);
+    const db = getDb();
+    const [riskySupplier] = await db.insert(suppliers).values({ name: `Fornecedor Risco Alto ${Date.now()}`, category: "Geral", risk: "Alto" }).returning();
+
+    const createResponse = await createTender(
+      jsonRequest("http://localhost/api/tenders", {
+        method: "POST",
+        session: { userId: buyer.id, accessLevel: "company_admin", companyId: company.id },
+        body: {
+          title: "Tender com fornecedor de risco",
+          deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          supplierIds: [riskySupplier.id],
+        },
+      })
+    );
+    const { tender } = await createResponse.json();
+
+    const bidResponse = await submitBid(
+      jsonRequest(`http://localhost/api/tenders/${tender.id}/bids`, {
+        method: "POST",
+        session: { userId: 1, accessLevel: "supplier", supplierId: riskySupplier.id },
+        body: { value: 100_000 },
+      }),
+      { params: Promise.resolve({ id: tender.id }) }
+    );
+    const { bid } = await bidResponse.json();
+
+    const response = await awardTender(
+      jsonRequest(`http://localhost/api/tenders/${tender.id}/award`, {
+        method: "POST",
+        session: { userId: buyer.id, accessLevel: "company_admin", companyId: company.id },
+        body: { bidId: bid.id, overrideRisk: true },
+      }),
+      { params: Promise.resolve({ id: tender.id }) }
+    );
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.riskBlock).toBe(true);
+    expect(body.canOverride).toBe(false);
+
+    const [unchangedBid] = await db.select().from(bids).where(eq(bids.id, bid.id));
+    expect(unchangedBid.status).toBe("submetida");
+  });
+
+  it("lets system_admin through with overrideRisk, marking the resulting PO as overridden", async () => {
+    const company = await makeCompany();
+    const buyer = await makeBuyer(company.id);
+    const db = getDb();
+    const [riskySupplier] = await db.insert(suppliers).values({ name: `Fornecedor Risco Alto B ${Date.now()}`, category: "Geral", risk: "Alto" }).returning();
+    const [admin] = await db
+      .insert(users)
+      .values({ name: `Admin ${Date.now()}`, email: `sla-admin-${Date.now()}@example.com`, role: "System Admin", initials: "SA", accessLevel: "system_admin" })
+      .returning();
+
+    const createResponse = await createTender(
+      jsonRequest("http://localhost/api/tenders", {
+        method: "POST",
+        session: { userId: buyer.id, accessLevel: "company_admin", companyId: company.id },
+        body: {
+          title: "Tender com fornecedor de risco, com override",
+          deadline: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          supplierIds: [riskySupplier.id],
+        },
+      })
+    );
+    const { tender } = await createResponse.json();
+
+    const bidResponse = await submitBid(
+      jsonRequest(`http://localhost/api/tenders/${tender.id}/bids`, {
+        method: "POST",
+        session: { userId: 1, accessLevel: "supplier", supplierId: riskySupplier.id },
+        body: { value: 200_000 },
+      }),
+      { params: Promise.resolve({ id: tender.id }) }
+    );
+    const { bid } = await bidResponse.json();
+
+    const blocked = await awardTender(
+      jsonRequest(`http://localhost/api/tenders/${tender.id}/award`, {
+        method: "POST",
+        session: { userId: admin.id, accessLevel: "system_admin" },
+        body: { bidId: bid.id },
+      }),
+      { params: Promise.resolve({ id: tender.id }) }
+    );
+    expect(blocked.status).toBe(409);
+
+    const overridden = await awardTender(
+      jsonRequest(`http://localhost/api/tenders/${tender.id}/award`, {
+        method: "POST",
+        session: { userId: admin.id, accessLevel: "system_admin" },
+        body: { bidId: bid.id, overrideRisk: true },
+      }),
+      { params: Promise.resolve({ id: tender.id }) }
+    );
+    expect(overridden.status).toBe(201);
+    const overriddenBody = await overridden.json();
+    expect(overriddenBody.po.riskOverriddenByUserId).toBe(admin.id);
+    expect(overriddenBody.po.riskOverriddenAt).not.toBeNull();
+  });
+});

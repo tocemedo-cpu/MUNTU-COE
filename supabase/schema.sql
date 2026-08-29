@@ -111,6 +111,13 @@ alter table public.purchase_orders add column if not exists supplier_id bigint r
 alter table public.purchase_orders add column if not exists tier text not null default 'standard'; -- automatico | standard | complexo
 alter table public.purchase_orders add column if not exists created_at timestamptz not null default now();
 
+-- Preenchidos só quando a PO foi gerada para um fornecedor de risco
+-- "Alto" (bloqueado por omissão) e alguém da Muntu aprovou mesmo assim —
+-- ver /api/requests/:id, /api/tenders/:id/award e
+-- /api/admin/payment-release/run.
+alter table public.purchase_orders add column if not exists risk_overridden_by_user_id bigint references public.users (id);
+alter table public.purchase_orders add column if not exists risk_overridden_at timestamptz;
+
 -- Tender/Sourcing (RFQ) — pedido de cotação a vários fornecedores
 -- convidados, com adjudicação a uma proposta que gera a PO. Primeira fase
 -- real do pilar Procurement.
@@ -252,6 +259,10 @@ create table if not exists public.payment_batches (
 -- Mesma razão que em receipts/exceptions: sem isto, company_admin recebia
 -- lotes de pagamento de todas as empresas via a API.
 alter table public.payment_batches add column if not exists company_id bigint references public.companies (id);
+
+-- Preenchido só quando /api/admin/payment-release/run libertou o lote
+-- sozinho — distingue de uma libertação manual (PATCH /api/payments/:id).
+alter table public.payment_batches add column if not exists auto_released_at timestamptz;
 
 create table if not exists public.documents (
   id bigint generated always as identity primary key,

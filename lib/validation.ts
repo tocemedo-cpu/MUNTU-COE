@@ -51,8 +51,14 @@ export const requestCreateSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
 });
 
+// overrideRisk: confirmação explícita para aprovar mesmo com o fornecedor
+// classificado risco "Alto" — sem isto, a aprovação é bloqueada (ver
+// PATCH /api/requests/:id). Só company_admin/coe_manager/system_admin
+// chegam a este ponto, mas só coe_manager/system_admin podem de facto
+// usar o override (verificado no handler, não aqui).
 export const requestActionSchema = z.object({
   action: z.enum(["approve", "reject"]),
+  overrideRisk: z.boolean().optional(),
 });
 
 export const supplierCreateSchema = z.object({
@@ -220,8 +226,11 @@ export const bidCreateSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
 });
 
+// overrideRisk: mesma regra de requestActionSchema — confirmação
+// explícita para adjudicar a uma proposta de fornecedor risco "Alto".
 export const tenderAwardSchema = z.object({
   bidId: z.number().int().positive(),
+  overrideRisk: z.boolean().optional(),
 });
 
 // Contratos/Call-off — mesma regra de âmbito que tenderCreateSchema:

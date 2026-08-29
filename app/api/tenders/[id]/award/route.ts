@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { bids, purchaseOrders, suppliers, tenders } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { checkSupplierRiskBlock } from "@/lib/risk-block";
 import { parseJsonBody, tenderAwardSchema } from "@/lib/validation";
 
 // Adjudica uma proposta: marca-a vencedora, rejeita as restantes, fecha o
@@ -37,6 +38,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, winningBid.supplierId));
   if (!supplier) return Response.json({ error: "Fornecedor da proposta não encontrado." }, { status: 400 });
 
+  // Mesmo bloqueio por risco alto do que a aprovação de um pedido — ver
+  // lib/risk-block.ts.
+  const riskCheck = checkSupplierRiskBlock({ risk: supplier.risk, accessLevel: session.accessLevel, overrideRisk: parsed.data.overrideRisk });
+  if (riskCheck.blocked) {
+    return Response.json({ error: riskCheck.reason, riskBlock: true, canOverride: riskCheck.canOverride }, { status: 409 });
+  }
+  const riskOverriddenByUserId = parsed.data.overrideRisk ? session.userId : null;
+
   const result = await db.transaction(async (tx) => {
     await tx.update(bids).set({ status: "vencedora" }).where(eq(bids.id, winningBid.id));
     await tx
@@ -61,6 +70,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             companyId: tender.companyId,
             supplierId: supplier.id,
             tier: "complexo",
+            riskOverriddenByUserId,
+            riskOverriddenAt: riskOverriddenByUserId ? new Date() : null,
           })
           .returning();
         break;

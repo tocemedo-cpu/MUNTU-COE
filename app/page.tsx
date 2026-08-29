@@ -158,6 +158,19 @@ const statusClass = (status: string) => {
   return "status status-slate";
 };
 
+// Corpo devolvido por uma rota que bloqueia por risco alto (ver
+// lib/risk-block.ts) — carregado no erro lançado por api() para quem
+// precisa de oferecer o override (aprovar pedido, adjudicar tender),
+// sem obrigar todos os outros chamadores a mudar.
+type ApiErrorBody = { error?: string; riskBlock?: boolean; canOverride?: boolean };
+class ApiError extends Error {
+  body: ApiErrorBody;
+  constructor(body: ApiErrorBody) {
+    super(body.error || "Erro de comunicação com o servidor");
+    this.body = body;
+  }
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -168,7 +181,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error((data as { error?: string }).error || "Erro de comunicação com o servidor");
+    throw new ApiError(data as ApiErrorBody);
   }
   return data as T;
 }
@@ -703,12 +716,26 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
 
   const filteredRequests = useMemo(() => { const query = search.toLowerCase(); return requests.filter((item) => [item.id, item.subject, item.supplier, item.status].some((field) => field.toLowerCase().includes(query))); }, [requests, search]);
 
-  const actOnRequest = async (id: string, action: "approve" | "reject") => {
+  const actOnRequest = async (id: string, action: "approve" | "reject", overrideRisk?: boolean) => {
     try {
-      const { request: updated } = await api<{ request: RequestItem }>(`/api/requests/${id}`, { method: "PATCH", body: JSON.stringify({ action }) });
+      const { request: updated } = await api<{ request: RequestItem }>(`/api/requests/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action, overrideRisk }),
+      });
       setRequests((items) => items.map((item) => (item.id === id ? updated : item)));
       toast[action === "approve" ? "success" : "error"](action === "approve" ? `${id} aprovado e enviado para execução` : `${id} devolvido ao solicitante`);
-    } catch {
+    } catch (error) {
+      // Bloqueio por risco alto (lib/risk-block.ts): quem pode confirmar
+      // o override tem a opção de repetir a acção com overrideRisk — sem
+      // isto, o único caminho seria pedir a outra pessoa para editar o
+      // risco do fornecedor só para conseguir aprovar.
+      if (error instanceof ApiError && error.body.riskBlock) {
+        if (error.body.canOverride && window.confirm(`${error.body.error} Aprovar mesmo assim?`)) {
+          return actOnRequest(id, action, true);
+        }
+        toast.error(error.body.error ?? "Fornecedor de risco alto");
+        return;
+      }
       toast.error("Não foi possível actualizar o pedido");
     }
   };
@@ -1524,22 +1551,42 @@ function Tenders({ user, suppliersList }: { user: AuthUser; suppliersList: Suppl
   </>;
 }
 
-function BuyerTenderDetail({ detail, canManage, onChanged }: { detail: { tender: TenderRow; invites: TenderInviteRow[]; bids: TenderBidRow[] }; canManage: boolean; onChanged: () => void }) {
+function BuyerTenderDetail({
+  detail,
+  canManage,
+  onChanged,
+}: {
+  detail: { tender: TenderRow; invites: TenderInviteRow[]; bids: TenderBidRow[] };
+  canManage: boolean;
+  onChanged: () => void;
+}) {
   const { tender, invites, bids } = detail;
   const [busy, setBusy] = useState(false);
   const sortedBids = [...bids].sort((a, b) => a.value - b.value);
 
-  const award = async (bidId: number) => {
+  const award = async (bidId: number, overrideRisk?: boolean) => {
     setBusy(true);
     try {
-      await api(`/api/tenders/${tender.id}/award`, { method: "POST", body: JSON.stringify({ bidId }) });
+      await api(`/api/tenders/${tender.id}/award`, { method: "POST", body: JSON.stringify({ bidId, overrideRisk }) });
       toast.success("Tender adjudicado — PO gerada");
       onChanged();
     } catch (error) {
+      // Mesmo bloqueio por risco alto do que a aprovação de um pedido —
+      // ver actOnRequest.
+      if (error instanceof ApiError && error.body.riskBlock) {
+        setBusy(false);
+        if (error.body.canOverride && window.confirm(`${error.body.error} Adjudicar mesmo assim?`)) {
+          await award(bidId, true);
+        } else {
+          toast.error(error.body.error ?? "Fornecedor de risco alto");
+        }
+        return;
+      }
       toast.error(error instanceof Error ? error.message : "Não foi possível adjudicar");
-    } finally {
       setBusy(false);
+      return;
     }
+    setBusy(false);
   };
 
   const cancel = async () => {

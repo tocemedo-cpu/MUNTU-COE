@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb, jsonRequest, uniqueDomain } from "./helpers";
-import { companies, purchaseOrders, requests } from "@/db/schema";
+import { companies, purchaseOrders, requests, suppliers, users } from "@/db/schema";
 import { PATCH as patchRequest } from "@/app/api/requests/[id]/route";
 
 // requests.id é uma chave de texto escolhida pelo chamador (não um
@@ -155,5 +155,98 @@ describe("PATCH /api/requests/:id (approve/reject)", () => {
     const body = await response.json();
     expect(body.request.decidedAt).toBeTruthy();
     expect(new Date(body.request.decidedAt).getTime()).toBeGreaterThanOrEqual(new Date(request.createdAt).getTime());
+  });
+});
+
+// Bloqueio por risco alto (lib/risk-block.ts): approve() vê o fornecedor
+// pelo nome (requests.supplier é texto livre, sem FK) — só bloqueia
+// quando existe mesmo uma linha em suppliers com esse nome e risk "Alto".
+describe("PATCH /api/requests/:id — bloqueio por risco alto", () => {
+  async function makeHighRiskCompanyAndRequest(label: string) {
+    const db = getDb();
+    const supplierName = `Fornecedor Risco Alto ${label} ${Date.now()}`;
+    const [supplier] = await db.insert(suppliers).values({ name: supplierName, category: "Geral", risk: "Alto" }).returning();
+    const id = `REQ-TEST-RISK-${label}-${Date.now()}`;
+    const [company] = await db.insert(companies).values({ name: `Cliente Risco ${id}`, domain: uniqueDomain(`request-risk-${id}`) }).returning();
+    const [request] = await db
+      .insert(requests)
+      .values({
+        id,
+        subject: "Peças de fornecedor de risco",
+        tower: "Requisition-to-PO",
+        type: "PO standard",
+        value: 500_000,
+        status: "Validação",
+        priority: "Normal",
+        owner: "Teste",
+        companyId: company.id,
+        sla: "24h",
+        stage: 1,
+        submitted: "hoje",
+        supplier: supplierName,
+        costCenter: "TEST-RISK",
+      })
+      .returning();
+    return { company, request, supplier };
+  }
+
+  it("blocks a company_admin outright, even trying overrideRisk, and creates no PO", async () => {
+    const { company, request } = await makeHighRiskCompanyAndRequest("1");
+    const response = await patchRequest(
+      jsonRequest(`http://localhost/api/requests/${request.id}`, {
+        method: "PATCH",
+        session: { userId: 1, accessLevel: "company_admin", companyId: company.id },
+        body: { action: "approve", overrideRisk: true },
+      }),
+      { params: Promise.resolve({ id: request.id }) }
+    );
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.riskBlock).toBe(true);
+    expect(body.canOverride).toBe(false);
+
+    const db = getDb();
+    const [unchanged] = await db.select().from(requests).where(eq(requests.id, request.id));
+    expect(unchanged.status).toBe("Validação");
+    expect(unchanged.decidedAt).toBeNull();
+    const pos = await db.select().from(purchaseOrders).where(eq(purchaseOrders.requestId, request.id));
+    expect(pos).toHaveLength(0);
+  });
+
+  it("blocks coe_manager/system_admin without overrideRisk, but lets them through with it, marking the PO as overridden", async () => {
+    const { company, request } = await makeHighRiskCompanyAndRequest("2");
+    const db = getDb();
+    // purchase_orders.risk_overridden_by_user_id tem uma FK real para
+    // users.id — precisa de apontar para uma linha real.
+    const [manager] = await db
+      .insert(users)
+      .values({ name: `Gestor ${Date.now()}`, email: `manager-${Date.now()}@example.com`, role: "COE Manager", initials: "GM", accessLevel: "coe_manager" })
+      .returning();
+
+    const blocked = await patchRequest(
+      jsonRequest(`http://localhost/api/requests/${request.id}`, {
+        method: "PATCH",
+        session: { userId: manager.id, accessLevel: "coe_manager", companyId: company.id },
+        body: { action: "approve" },
+      }),
+      { params: Promise.resolve({ id: request.id }) }
+    );
+    expect(blocked.status).toBe(409);
+    const blockedBody = await blocked.json();
+    expect(blockedBody.canOverride).toBe(true);
+
+    const overridden = await patchRequest(
+      jsonRequest(`http://localhost/api/requests/${request.id}`, {
+        method: "PATCH",
+        session: { userId: manager.id, accessLevel: "coe_manager", companyId: company.id },
+        body: { action: "approve", overrideRisk: true },
+      }),
+      { params: Promise.resolve({ id: request.id }) }
+    );
+    expect(overridden.status).toBe(200);
+
+    const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.requestId, request.id));
+    expect(po.riskOverriddenByUserId).toBe(manager.id);
+    expect(po.riskOverriddenAt).not.toBeNull();
   });
 });
