@@ -170,29 +170,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-// Clicar 4 vezes seguidas no símbolo abre o acesso reservado (COE/System
-// Admin) sem qualquer botão visível — só quem já sabe do gesto o encontra.
-// Cada clique tem de chegar a menos de 800ms do anterior; senão a
-// contagem recomeça do zero.
-const SECRET_CLICKS_REQUIRED = 4;
-const SECRET_CLICK_WINDOW_MS = 800;
-
-function Brand({ compact = false, inverse = false, onSecretUnlock }: { compact?: boolean; inverse?: boolean; onSecretUnlock?: () => void }) {
-  const clickCountRef = useRef(0);
-  const lastClickRef = useRef(0);
-
-  const handleClick = () => {
-    if (!onSecretUnlock) return;
-    const now = Date.now();
-    clickCountRef.current = now - lastClickRef.current > SECRET_CLICK_WINDOW_MS ? 1 : clickCountRef.current + 1;
-    lastClickRef.current = now;
-    if (clickCountRef.current >= SECRET_CLICKS_REQUIRED) {
-      clickCountRef.current = 0;
-      onSecretUnlock();
-    }
-  };
-
-  return <div className={`brand ${inverse ? "brand-inverse" : ""}`} onClick={onSecretUnlock ? handleClick : undefined} role={onSecretUnlock ? "button" : undefined} tabIndex={onSecretUnlock ? -1 : undefined}>
+function Brand({ compact = false, inverse = false }: { compact?: boolean; inverse?: boolean }) {
+  return <div className={`brand ${inverse ? "brand-inverse" : ""}`}>
     <img src="/muntu/muntu-mark.svg" alt="Símbolo Muntu COE" />
     {!compact && <span><strong>MUNTU</strong><small>CENTRE OF EXCELLENCE</small></span>}
   </div>;
@@ -200,18 +179,16 @@ function Brand({ compact = false, inverse = false, onSecretUnlock }: { compact?:
 
 function PublicSite({
   onLogin,
-  onSecretAdminLogin,
   onCandidatar,
   publicStats,
 }: {
   onLogin: () => void;
-  onSecretAdminLogin: () => void;
   onCandidatar: () => void;
   publicStats: PublicStats;
 }) {
   return <div className="public-site">
     <header className="public-header">
-      <Brand onSecretUnlock={onSecretAdminLogin} />
+      <Brand />
       <nav aria-label="Navegação principal"><a href="#solucao">Solução</a><a href="#capacidades">Capacidades</a><a href="#modelo">Modelo operacional</a><a href="#expansao">Expansão</a></nav>
       <div className="public-header-actions">
         <Button variant="outline" onClick={onCandidatar}>Candidatar empresa/fornecedor</Button>
@@ -577,48 +554,6 @@ function Login({
         <button type="button" className="back-link" onClick={() => { onResetTokenConsumed(); setStep("email"); }}>Cancelar</button>
       </form>}
     <div className="secure-note"><ShieldCheck /><span>Ambiente seguro • Autenticação ligada à base de dados • AOA</span></div></div></section>
-  </main>;
-}
-
-// Ecrã de acesso reservado (COE Manager / System Admin) — só se chega
-// aqui pelo gesto secreto no símbolo (ver Brand/SECRET_CLICKS_REQUIRED).
-// Deliberadamente diferente do login normal: um único passo (e-mail +
-// password, sem lookup de empresa/SSO), estética escura e sem a
-// navegação/marketing do site público à volta.
-function AdminLogin({ onBack, onSuccess }: { onBack: () => void; onSuccess: (user: AuthUser) => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setLoading(true);
-    try {
-      const { user } = await api<{ user: AuthUser }>("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ email, password }),
-      });
-      toast.success("Sessão iniciada com sucesso");
-      onSuccess(user);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível iniciar sessão");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return <main className="admin-login-page">
-    <div className="admin-login-card">
-      <Brand compact inverse />
-      <p className="kicker">ACESSO RESERVADO</p>
-      <h2>Muntu COE — Operações</h2>
-      <form onSubmit={submit}>
-        <label>E-mail<div className="input-with-icon"><Mail /><Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoFocus /></div></label>
-        <label>Palavra-passe<div className="input-with-icon"><KeyRound /><Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></div></label>
-        <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={loading}>{loading ? "A entrar…" : "Entrar"} <ArrowRight /></Button>
-      </form>
-      <button type="button" className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button>
-    </div>
   </main>;
 }
 
@@ -2045,7 +1980,7 @@ function EntityDocuments({
 function RequestDetail({ request, onAction, canDecide, onUploadDocument, onDownloadDocument }: { request: RequestItem; onAction: (id: string, action: "approve" | "reject") => void; canDecide: boolean; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) { return <><SheetHeader><p className="kicker">DOSSIER DA TRANSACÇÃO</p><SheetTitle>{request.id}</SheetTitle><SheetDescription>{request.subject}</SheetDescription></SheetHeader><div className="sheet-body"><div className="sheet-status"><span className={statusClass(request.status)}>{request.status}</span><span className={request.sla.includes("Vencido") ? "text-danger" : ""}><Clock3 /> {request.sla}</span></div><div className="sheet-value"><small>VALOR</small><strong>{money(request.value)}</strong><p>{request.supplier} • {request.costCenter}</p></div><div className="timeline"><h3>Workflow</h3>{stages.map((stage, index) => <div key={stage} className={index < request.stage ? "complete" : index === request.stage ? "current" : ""}><span>{index < request.stage ? <Check /> : index + 1}</span><div><strong>{stage}</strong><small>{index < request.stage ? "Concluído" : index === request.stage ? "Em curso • Muntu Operations" : "A aguardar"}</small></div></div>)}</div><EntityDocuments entityType="request" entityId={request.id} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} /><div className="audit-note"><ShieldCheck /><span><strong>Auditoria activa</strong>Todas as decisões, alterações e anexos ficam registados.</span></div></div>{canDecide && request.status === "Aprovação" && <div className="sheet-actions"><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div>}</>; }
 
 export default function HomePage() {
-  const [screen, setScreen] = useState<"public" | "login" | "admin-login" | "portal" | "candidatura">("public");
+  const [screen, setScreen] = useState<"public" | "login" | "portal" | "candidatura">("public");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [ssoError, setSsoError] = useState<string | undefined>(undefined);
@@ -2074,10 +2009,7 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, []);
 
-  // "admin-login" nunca fica registado no hash da URL — só se chega lá
-  // pelo gesto secreto no símbolo (4 cliques), nunca por um link directo
-  // ou histórico do browser, o que manteria a existência do ecrã óbvia.
-  const navigate = (next: "public" | "login" | "admin-login" | "portal" | "candidatura") => { setScreen(next); if (next !== "admin-login") window.history.replaceState(null, "", next === "public" ? window.location.pathname : `#${next}`); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const navigate = (next: "public" | "login" | "portal" | "candidatura") => { setScreen(next); window.history.replaceState(null, "", next === "public" ? window.location.pathname : `#${next}`); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   useEffect(() => {
     const hash = window.location.hash;
@@ -2149,14 +2081,11 @@ export default function HomePage() {
   if (screen === "login" || (screen === "portal" && !user)) {
     return <><Toaster richColors position="top-right" /><Login onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} initialError={ssoError} resetToken={resetToken} onResetTokenConsumed={() => setResetToken(undefined)} publicStats={publicStats} /></>;
   }
-  if (screen === "admin-login") {
-    return <><Toaster richColors position="top-right" /><AdminLogin onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} /></>;
-  }
   if (screen === "candidatura") {
     return <><Toaster richColors position="top-right" /><CandidaturaScreen onBack={() => navigate("public")} initialApplicationId={applicationId} initialToken={applicationToken} onLinkConsumed={() => { setApplicationToken(undefined); setApplicationId(undefined); }} /></>;
   }
   if (screen === "portal" && user) {
     return <Portal user={user} onLogout={logout} />;
   }
-  return <PublicSite onLogin={() => navigate("login")} onSecretAdminLogin={() => navigate("admin-login")} onCandidatar={() => navigate("candidatura")} publicStats={publicStats} />;
+  return <PublicSite onLogin={() => navigate("login")} onCandidatar={() => navigate("candidatura")} publicStats={publicStats} />;
 }

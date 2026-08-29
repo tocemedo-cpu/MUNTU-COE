@@ -70,7 +70,7 @@ A página **Utilizadores** (`/api/admin/users`) lista todos os utilizadores da p
 
 Antes disto, o primeiro utilizador de uma empresa era criado pela homologação da candidatura (ver secção acima), mas não havia forma nenhuma — nem self-service, nem via admin — de juntar mais colegas à mesma empresa sem SQL directo. A página **Equipa**, visível só para `company_admin`, fecha esse buraco: lista os utilizadores da sua própria empresa e convida novos (`GET`/`POST /api/company/users`), sempre escopado a `session.companyId` — nunca a um id escolhido no pedido, por isso um `company_admin` não consegue convidar ninguém para outra empresa. Só pode atribuir `requester` ou `company_admin` (nunca `supplier`/`coe_manager`/`system_admin`). Tal como a homologação, cria o utilizador sem palavra-passe e envia o mesmo e-mail de "definir palavra-passe" (`lib/user-provisioning.ts#provisionUserWithoutPassword`, extraído da homologação para ser partilhado pelos três caminhos de criação de utilizador — homologação, `/api/admin/users` e `/api/company/users`).
 
-### Contas dos donos da operação (COE Manager / System Admin) e acesso reservado
+### Contas dos donos da operação (COE Manager / System Admin)
 
 As contas reais de quem gere a operação (não dados de demonstração) são criadas por um script dedicado, não pelo seed:
 
@@ -80,7 +80,7 @@ DATABASE_URL="<connection string real>" npx tsx scripts/create-owner-admins.ts
 
 Cria `tocemedo@gmail.com` (`coe_manager`) e `zelyvaldog@gmail.com` (`system_admin`) — ou, se já existirem, só actualiza o papel/dados, **nunca** a password (correr o script outra vez nunca desfaz uma troca de password já feita). Numa criação nova, imprime uma password inicial aleatória uma única vez no terminal — guarde-a; a partir daí muda-se como qualquer conta, por "Recuperar acesso" no ecrã de login.
 
-Estas duas contas entram por um ecrã diferente do login normal dos clientes/fornecedores — **acesso reservado**, com estética escura e um único passo (e-mail + password, sem o lookup de empresa/SSO). Não há nenhum botão visível para lá chegar: no site público, clicar 4 vezes seguidas (menos de 800ms entre cliques) no símbolo Muntu do cabeçalho abre-o. A URL nunca fica marcada com esse ecrã (sem hash tipo `#admin-login`) precisamente para não ficar óbvio nem no histórico do browser — quem não conhece o gesto não encontra o ecrã por engano.
+Estas duas contas entram pelo mesmo ecrã de login que qualquer cliente ou fornecedor — "Aceder ao portal". Não há ecrã reservado nem gesto secreto: como `muntucoe.ao` não é o domínio de nenhuma empresa registada, `POST /api/auth/company-lookup` cai directamente no fluxo de e-mail/palavra-passe (o mesmo que qualquer conta interna Muntu ou de fornecedor sem SSO usa), sem precisar de nenhum caminho especial. Havia antes um ecrã escuro dedicado, aberto por 4 cliques seguidos no símbolo do cabeçalho — foi removido por ser complexidade sem benefício real: o login normal já trata este caso correctamente.
 
 ## Facturação de actividade (cobrança ao cliente)
 
