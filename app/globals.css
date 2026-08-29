@@ -219,8 +219,9 @@ a { color: inherit; text-decoration: none; }
 .candidatura-card form > label { display: grid; gap: 8px; color: #3e464d; font-size: 13px; font-weight: 700; }
 .candidatura-card .sheet-documents { margin-top: 26px; padding-top: 22px; border-top: 1px solid #ebe5dd; }
 .candidatura-card .sheet-documents-head { align-items: flex-start; gap: 12px; }
-.candidatura-doc-row { display: grid; grid-template-columns: 24px 1fr; gap: 10px; align-items: center; padding: 12px 0; color: #515b62; border-top: 1px solid #ebe5dd; }
+.candidatura-doc-row { display: grid; grid-template-columns: 24px 1fr 18px; gap: 10px; align-items: center; padding: 12px 0; color: #515b62; border-top: 1px solid #ebe5dd; text-decoration: none; }
 .candidatura-doc-row svg { width: 17px; color: var(--burgundy); }
+.candidatura-doc-row svg:last-child { color: #7a848a; }
 .candidatura-doc-row span { display: flex; flex-direction: column; gap: 3px; }
 .candidatura-doc-row strong { font-size: 13px; }
 .candidatura-doc-row small { color: #838c91; font-size: 11px; }

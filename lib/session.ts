@@ -60,6 +60,16 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** Id aleatório de uso único para um token assinado — usado pelos tokens
+ * que só devem poder ser consumidos uma vez (recuperação de acesso e
+ * boas-vindas: ver lib/consumed-tokens.ts). Não faz sentido para a sessão
+ * principal nem para o estado CSRF/PKCE do SSO, que precisam de ser
+ * verificados repetidamente enquanto válidos — por isso não faz parte de
+ * signPayload em si. */
+export function generateJti(): string {
+  return crypto.randomUUID();
+}
+
 /** Assina um payload JSON qualquer com expiração — primitiva reutilizada
  * pela sessão principal e pelo estado CSRF/PKCE do fluxo de SSO. */
 export async function signPayload<T extends object>(payload: T, ttlSeconds: number): Promise<string> {

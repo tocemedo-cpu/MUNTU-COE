@@ -1,7 +1,7 @@
 import type { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { sendWelcomeSetPasswordEmail } from "./mailer";
-import { signPayload, type AccessLevel } from "./session";
+import { generateJti, signPayload, type AccessLevel } from "./session";
 
 const WELCOME_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 dias — mesmo prazo usado para repor palavra-passe
 
@@ -63,7 +63,7 @@ export async function provisionUserWithoutPassword(
     })
     .returning();
 
-  const welcomeToken = await signPayload({ userId: newUser.id, purpose: "password_reset" }, WELCOME_TOKEN_TTL_SECONDS);
+  const welcomeToken = await signPayload({ userId: newUser.id, purpose: "password_reset", jti: generateJti() }, WELCOME_TOKEN_TTL_SECONDS);
   const setPasswordUrl = `${origin}/?reset_token=${encodeURIComponent(welcomeToken)}#login`;
   try {
     await sendWelcomeSetPasswordEmail(params.email, params.name, setPasswordUrl);

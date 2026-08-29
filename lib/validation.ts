@@ -1,17 +1,27 @@
 import { z, type ZodSchema } from "zod";
 import { SUPPORT_CATEGORIES, SUPPORT_PRIORITIES, SUPPORT_STATUSES } from "./support";
 
-export async function parseJsonBody<T>(
-  request: Request,
+/** Como parseJsonBody, mas para um corpo já lido — para rotas que
+ * precisam de olhar para o JSON antes de saber contra que schema validar
+ * (ex.: PATCH /api/applications/:id, que aceita mudança de estado OU
+ * atribuição de responsável no mesmo corpo, nunca os dois). Um Request só
+ * dá para ler o corpo uma vez, por isso essas rotas não podem usar
+ * parseJsonBody directamente.*/
+export function validateBody<T>(
+  json: unknown,
   schema: ZodSchema<T>
-): Promise<{ success: true; data: T } | { success: false; response: Response }> {
-  const json = await request.json().catch(() => null);
+): { success: true; data: T } | { success: false; response: Response } {
   const result = schema.safeParse(json);
   if (!result.success) {
     const message = result.error.issues[0]?.message ?? "Payload inválido";
     return { success: false, response: Response.json({ error: message }, { status: 400 }) };
   }
   return { success: true, data: result.data };
+}
+
+export async function parseJsonBody<T>(request: Request, schema: ZodSchema<T>) {
+  const json = await request.json().catch(() => null);
+  return validateBody(json, schema);
 }
 
 export const loginSchema = z.object({
@@ -181,3 +191,10 @@ export const applicationReviewSchema = z.union([
     rejectionReason: z.string().trim().min(1, "Indique o motivo da rejeição").max(1000),
   }),
 ]);
+
+// Atribuição de responsável — corpo separado do de mudança de estado
+// (applicationReviewSchema), tratado como uma acção distinta pelo mesmo
+// PATCH /api/applications/:id: o chamador manda um dos dois, nunca ambos.
+export const applicationAssignSchema = z.object({
+  assignedToUserId: z.number().int().positive().nullable(),
+});

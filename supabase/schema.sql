@@ -217,6 +217,7 @@ create table if not exists public.applications (
   notes text not null default '',
   status text not null default 'recebida', -- recebida | em_avaliacao | aprovada | rejeitada | homologada
   rejection_reason text,
+  assigned_to_user_id bigint references public.users (id),
   reviewed_by_user_id bigint references public.users (id),
   reviewed_at timestamptz,
   homologated_at timestamptz,
@@ -225,6 +226,7 @@ create table if not exists public.applications (
   created_user_id bigint references public.users (id),
   created_at timestamptz not null default now()
 );
+alter table public.applications add column if not exists assigned_to_user_id bigint references public.users (id);
 
 -- Caixa de suporte: qualquer utilizador autenticado pode abrir um pedido;
 -- só o System Admin vê a caixa de entrada completa. Ver lib/support.ts
@@ -250,6 +252,16 @@ create table if not exists public.support_messages (
   author_user_id bigint not null references public.users (id),
   body text not null,
   created_at timestamptz not null default now()
+);
+
+-- Marca um token de uso único (jti) como já consumido — recuperação de
+-- acesso/boas-vindas (password_reset), que só devem poder repor a
+-- password uma vez. A PK em jti é a própria garantia de uso único.
+create table if not exists public.consumed_tokens (
+  jti text primary key,
+  purpose text not null,
+  expires_at timestamptz not null,
+  consumed_at timestamptz not null default now()
 );
 
 -- Preço por unidade (Estudo de Viabilidade §32.4/53.1 — modelo híbrido
@@ -327,6 +339,7 @@ alter table public.client_invoice_lines enable row level security;
 alter table public.support_tickets enable row level security;
 alter table public.support_messages enable row level security;
 alter table public.applications enable row level security;
+alter table public.consumed_tokens enable row level security;
 
 drop policy if exists "public read requests" on public.requests;
 drop policy if exists "public write requests" on public.requests;
@@ -368,7 +381,8 @@ create policy "public write documents" on public.documents for insert with check
 
 -- Sem política de select em `users`, `companies`, `billing_rates`,
 -- `client_invoices`, `client_invoice_lines`, `document_files`,
--- `support_tickets`, `support_messages` nem `applications`: mantém-nas
+-- `support_tickets`, `support_messages`, `applications` nem
+-- `consumed_tokens`: mantém-nas
 -- ilegíveis pela API pública/anon key (segredos de SSO, dados financeiros,
 -- dados de candidatos, bytes reais dos
 -- ficheiros carregados e conteúdo de pedidos de suporte dos utilizadores).

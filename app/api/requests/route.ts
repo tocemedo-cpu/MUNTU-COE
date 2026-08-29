@@ -2,6 +2,7 @@ import { and, eq, like, or, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests, users } from "@/db/schema";
 import { getSession } from "@/lib/authz";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { formatPtDateTime } from "@/lib/format";
 import { computeRequestSlaDueAt } from "@/lib/requests-sla";
 import { parseJsonBody, requestCreateSchema } from "@/lib/validation";
@@ -90,8 +91,7 @@ async function insertRequestWithGeneratedId(db: ReturnType<typeof getDb>, values
       const [created] = await db.insert(requests).values({ id, ...values }).returning();
       return created;
     } catch (error) {
-      const isUniqueViolation = (error as { code?: string } | undefined)?.code === "23505";
-      if (!isUniqueViolation || attempt === 4) throw error;
+      if (!isUniqueViolation(error) || attempt === 4) throw error;
     }
   }
   throw new Error("Não foi possível gerar um id de pedido único");

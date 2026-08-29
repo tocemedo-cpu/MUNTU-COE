@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { applications } from "@/db/schema";
 import { APPLICATION_REVIEW_ROLES, APPLICATION_TOKEN_TTL_SECONDS, type ApplicationTokenPayload } from "@/lib/application-access";
 import { getOptionalSession } from "@/lib/authz";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { sendApplicationReceivedEmail } from "@/lib/mailer";
 import { signPayload } from "@/lib/session";
 import { applicationCreateSchema, parseJsonBody } from "@/lib/validation";
@@ -70,8 +71,7 @@ async function insertApplicationWithGeneratedId(db: ReturnType<typeof getDb>, va
       const [created] = await db.insert(applications).values({ id, ...values }).returning();
       return created;
     } catch (error) {
-      const isUniqueViolation = (error as { code?: string } | undefined)?.code === "23505";
-      if (!isUniqueViolation || attempt === 4) throw error;
+      if (!isUniqueViolation(error) || attempt === 4) throw error;
     }
   }
   throw new Error("Não foi possível gerar um id de candidatura único");

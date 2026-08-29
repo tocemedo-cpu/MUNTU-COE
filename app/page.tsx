@@ -108,6 +108,7 @@ type ApplicationItem = {
   notes: string;
   status: ApplicationStatus;
   rejectionReason: string | null;
+  assignedToUserId: number | null;
   homologatedAt: string | null;
   createdAt: string;
 };
@@ -378,7 +379,7 @@ function CandidaturaScreen({
             <input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadApplicationDocument(file); event.target.value = ""; }} />
             <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInputRef.current?.click()}><UploadCloud /> Anexar</Button>
           </div>
-          {docs.length === 0 ? <p className="muted">Sem documentos anexados.</p> : docs.map((doc) => <div key={doc.id} className="candidatura-doc-row"><FileText /><span><strong>{doc.name}</strong><small>{doc.updated}</small></span></div>)}
+          {docs.length === 0 ? <p className="muted">Sem documentos anexados.</p> : docs.map((doc) => <a key={doc.id} className="candidatura-doc-row" href={`/api/applications/${encodeURIComponent(applicationId ?? "")}/documents/${doc.id}/download?token=${encodeURIComponent(token ?? "")}`}><FileText /><span><strong>{doc.name}</strong><small>{doc.updated}</small></span><Download /></a>)}
         </div>
       </div>
     </main>;
@@ -1628,9 +1629,23 @@ function Applications({
   onDownloadDocument: (doc: DocumentItem) => void;
 }) {
   const [selected, setSelected] = useState<ApplicationItem | null>(null);
+  const [reviewers, setReviewers] = useState<Approver[]>([]);
   const pending = applications.filter((item) => item.status === "recebida" || item.status === "em_avaliacao").length;
   const approved = applications.filter((item) => item.status === "aprovada").length;
   const homologated = applications.filter((item) => item.status === "homologada").length;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { approvers } = await api<{ approvers: Approver[] }>("/api/approvers");
+        setReviewers(approvers.filter((item) => item.accessLevel === "coe_manager" || item.accessLevel === "system_admin"));
+      } catch {
+        // silencioso — a atribuição fica só sem opções, o resto da página continua a funcionar
+      }
+    })();
+  }, []);
+
+  const reviewerName = (userId: number | null) => (userId == null ? "—" : (reviewers.find((r) => r.id === userId)?.name ?? "—"));
 
   return <>
     <PageHeader kicker="HOMOLOGAÇÃO" title="Candidaturas" description="Avaliação e homologação de empresas e fornecedores — o primeiro contacto real com a plataforma." />
@@ -1642,12 +1657,13 @@ function Applications({
     </section>
     <section className="panel">
       {applications.length === 0 ? <div className="empty-state"><Inbox /><h3>Sem candidaturas</h3><p>Ainda não chegou nenhuma candidatura de empresa ou fornecedor.</p></div> : <div className="responsive-table"><Table>
-        <TableHeader><TableRow><TableHead>Candidatura</TableHead><TableHead>Tipo</TableHead><TableHead>Contacto</TableHead><TableHead>Estado</TableHead><TableHead>Recebida</TableHead><TableHead /></TableRow></TableHeader>
+        <TableHeader><TableRow><TableHead>Candidatura</TableHead><TableHead>Tipo</TableHead><TableHead>Contacto</TableHead><TableHead>Estado</TableHead><TableHead>Atribuída</TableHead><TableHead>Recebida</TableHead><TableHead /></TableRow></TableHeader>
         <TableBody>{applications.map((application) => <TableRow key={application.id}>
           <TableCell><strong>{application.companyName}</strong><br /><small className="muted">{application.id}</small></TableCell>
           <TableCell>{application.kind === "empresa" ? "Empresa" : "Fornecedor"}</TableCell>
           <TableCell>{application.contactName}<br /><small className="muted">{application.contactEmail}</small></TableCell>
           <TableCell><span className={applicationStatusPill(application.status)}>{APPLICATION_STATUS_LABEL[application.status]}</span></TableCell>
+          <TableCell>{reviewerName(application.assignedToUserId)}</TableCell>
           <TableCell>{new Date(application.createdAt).toLocaleDateString("pt-PT")}</TableCell>
           <TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(application)} aria-label={`Ver candidatura ${application.id}`}><Eye /></Button></TableCell>
         </TableRow>)}</TableBody>
@@ -1657,6 +1673,7 @@ function Applications({
       <SheetContent className="request-sheet sm:max-w-xl">
         {selected && <ApplicationReviewSheet
           application={selected}
+          reviewers={reviewers}
           onUpdated={(updated) => { onApplicationUpdated(updated); setSelected(updated); }}
           onUploadDocument={onUploadDocument}
           onDownloadDocument={onDownloadDocument}
@@ -1668,17 +1685,36 @@ function Applications({
 
 function ApplicationReviewSheet({
   application,
+  reviewers,
   onUpdated,
   onUploadDocument,
   onDownloadDocument,
 }: {
   application: ApplicationItem;
+  reviewers: Approver[];
   onUpdated: (application: ApplicationItem) => void;
   onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
   onDownloadDocument: (doc: DocumentItem) => void;
 }) {
   const [rejectionReason, setRejectionReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+
+  const assign = async (assignedToUserId: number | null) => {
+    setAssigning(true);
+    try {
+      const { application: updated } = await api<{ application: ApplicationItem }>(`/api/applications/${application.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignedToUserId }),
+      });
+      onUpdated(updated);
+      toast.success(assignedToUserId ? "Candidatura atribuída" : "Atribuição removida");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível atribuir a candidatura");
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   const review = async (status: "em_avaliacao" | "aprovada" | "rejeitada") => {
     if (status === "rejeitada" && !rejectionReason.trim()) {
@@ -1717,6 +1753,10 @@ function ApplicationReviewSheet({
     <SheetHeader><p className="kicker">CANDIDATURA {application.id}</p><SheetTitle>{application.companyName}</SheetTitle><SheetDescription>{application.kind === "empresa" ? "Empresa cliente (Operadora)" : "Fornecedor (Prestadora)"}</SheetDescription></SheetHeader>
     <div className="sheet-body">
       <div className="sheet-status"><span className={applicationStatusPill(application.status)}>{APPLICATION_STATUS_LABEL[application.status]}</span></div>
+      <label>Responsável<NativeSelect value={application.assignedToUserId ?? ""} disabled={assigning} onChange={(event) => assign(event.target.value ? Number(event.target.value) : null)} className="field-control">
+        <NativeSelectOption value="">Por atribuir</NativeSelectOption>
+        {reviewers.map((reviewer) => <NativeSelectOption key={reviewer.id} value={reviewer.id}>{reviewer.name}</NativeSelectOption>)}
+      </NativeSelect></label>
       <div className="candidatura-detail-grid">
         <div><small>NIF</small><strong>{application.taxId}</strong></div>
         <div><small>Sector</small><strong>{application.sector || "—"}</strong></div>

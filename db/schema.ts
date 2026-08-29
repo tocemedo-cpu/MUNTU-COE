@@ -256,6 +256,11 @@ export const applications = pgTable("applications", {
   notes: text("notes").notNull().default(""),
   status: text("status").notNull().default("recebida"), // recebida | em_avaliacao | aprovada | rejeitada | homologada
   rejectionReason: text("rejection_reason"),
+  // Quem está a tratar esta candidatura — diferente de reviewedByUserId
+  // (quem foi a última pessoa a mudar o estado): pode haver um
+  // responsável atribuído sem ainda ter havido nenhuma decisão. Mesmo
+  // padrão já usado em support_tickets.assigned_to_user_id.
+  assignedToUserId: bigint("assigned_to_user_id", { mode: "number" }).references(() => users.id),
   reviewedByUserId: bigint("reviewed_by_user_id", { mode: "number" }).references(() => users.id),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   homologatedAt: timestamp("homologated_at", { withTimezone: true }),
@@ -298,4 +303,18 @@ export const supportMessages = pgTable("support_messages", {
     .references(() => users.id),
   body: text("body").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
+// Marca um token de uso único (jti, ver lib/session.ts#generateJti) como
+// já consumido — usado pelos tokens de recuperação de acesso/boas-vindas
+// (password_reset), que só devem poder repor a password uma vez. A PK em
+// jti é a própria garantia de "uso único": um segundo consumo do mesmo
+// jti falha por violação de unicidade. Não se aplica ao token de acesso à
+// candidatura (application_access), que precisa de continuar a servir
+// vários pedidos (estado + upload) ao longo da janela de 30 dias.
+export const consumedTokens = pgTable("consumed_tokens", {
+  jti: text("jti").primaryKey(),
+  purpose: text("purpose").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }).notNull().default(sql`now()`),
 });

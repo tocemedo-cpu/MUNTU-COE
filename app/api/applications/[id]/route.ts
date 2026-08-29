@@ -1,9 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { applications, documents } from "@/db/schema";
+import { applications, documents, users } from "@/db/schema";
 import { APPLICATION_REVIEW_ROLES, verifyApplicationAccessToken } from "@/lib/application-access";
 import { getOptionalSession } from "@/lib/authz";
-import { applicationReviewSchema, parseJsonBody } from "@/lib/validation";
+import { applicationAssignSchema, applicationReviewSchema, validateBody } from "@/lib/validation";
 
 // Vista de uma candidatura: interna (Muntu, a avaliar) ou pública (o
 // próprio candidato, por token — ver README secção "Como um utilizador
@@ -31,11 +31,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   return Response.json({ application, documents: docs });
 }
 
-// Transições de estado — só a Muntu (coe_manager/system_admin) avalia
-// (Avaliação -> Aprovada/Rejeitada). A homologação em si (que cria a
-// empresa/fornecedor/utilizador) é uma acção separada — ver
-// [id]/homologate/route.ts — porque tem efeitos que uma simples mudança de
-// estado não devia ter escondidos dentro de si.
+// Duas acções distintas partilham este PATCH, nunca no mesmo pedido:
+// - mudança de estado (Avaliação -> Aprovada/Rejeitada), só Muntu
+//   (coe_manager/system_admin). A homologação em si (que cria a
+//   empresa/fornecedor/utilizador) é uma acção separada — ver
+//   [id]/homologate/route.ts — porque tem efeitos que uma simples mudança
+//   de estado não devia ter escondidos dentro de si.
+// - atribuição de responsável (assignedToUserId), independente do estado
+//   — mesmo padrão de support_tickets.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = getOptionalSession(request);
   if (!session || !APPLICATION_REVIEW_ROLES.includes(session.accessLevel)) {
@@ -43,16 +46,37 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   const { id } = await params;
-  const parsed = await parseJsonBody(request, applicationReviewSchema);
-  if (!parsed.success) return parsed.response;
-  const payload = parsed.data;
-
   const db = getDb();
   const [existing] = await db.select().from(applications).where(eq(applications.id, id));
   if (!existing) return Response.json({ error: "Candidatura não encontrada" }, { status: 404 });
+
+  const json: unknown = await request.json().catch(() => null);
+
+  if (json && typeof json === "object" && "assignedToUserId" in json) {
+    const parsed = validateBody(json, applicationAssignSchema);
+    if (!parsed.success) return parsed.response;
+
+    if (parsed.data.assignedToUserId != null) {
+      const [assignee] = await db.select().from(users).where(eq(users.id, parsed.data.assignedToUserId));
+      if (!assignee || !APPLICATION_REVIEW_ROLES.includes(assignee.accessLevel)) {
+        return Response.json({ error: "Só é possível atribuir a um coe_manager ou system_admin." }, { status: 400 });
+      }
+    }
+
+    const [updated] = await db
+      .update(applications)
+      .set({ assignedToUserId: parsed.data.assignedToUserId })
+      .where(eq(applications.id, id))
+      .returning();
+    return Response.json({ application: updated });
+  }
+
   if (existing.status === "homologada") {
     return Response.json({ error: "Candidatura já homologada, já não pode mudar de estado." }, { status: 400 });
   }
+  const parsed = validateBody(json, applicationReviewSchema);
+  if (!parsed.success) return parsed.response;
+  const payload = parsed.data;
 
   const [updated] = await db
     .update(applications)

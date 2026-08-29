@@ -5,6 +5,7 @@ import { companies, suppliers, users } from "@/db/schema";
 import { GET as listApplications, POST as createApplication } from "@/app/api/applications/route";
 import { GET as getApplication, PATCH as reviewApplication } from "@/app/api/applications/[id]/route";
 import { POST as uploadApplicationDocument } from "@/app/api/applications/[id]/documents/route";
+import { GET as downloadApplicationDocument } from "@/app/api/applications/[id]/documents/[documentId]/download/route";
 import { POST as homologateApplication } from "@/app/api/applications/[id]/homologate/route";
 
 function requestWithForm(url: string, form: FormData) {
@@ -180,6 +181,128 @@ describe("POST /api/applications/:id/documents (token-gated applicant upload)", 
     const forbidden = await uploadApplicationDocument(requestWithForm(`http://localhost/api/applications/${id}/documents`, badForm), {
       params: Promise.resolve({ id }),
     });
+    expect(forbidden.status).toBe(403);
+  });
+});
+
+describe("GET /api/applications/:id/documents/:documentId/download", () => {
+  it("lets the applicant download their own uploaded document with the right token", async () => {
+    const { body } = await submitApplication("empresa");
+    const id = body.application.id;
+    const content = "conteudo real do documento de candidatura";
+    const file = new File([content], "certidao.pdf", { type: "application/pdf" });
+    const form = new FormData();
+    form.append("token", body.token);
+    form.append("file", file);
+    const uploaded = await uploadApplicationDocument(requestWithForm(`http://localhost/api/applications/${id}/documents`, form), {
+      params: Promise.resolve({ id }),
+    });
+    const uploadedBody = await uploaded.json();
+    const documentId = String(uploadedBody.document.id);
+
+    const ok = await downloadApplicationDocument(
+      new Request(`http://localhost/api/applications/${id}/documents/${documentId}/download?token=${body.token}`),
+      { params: Promise.resolve({ id, documentId }) }
+    );
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe(content);
+
+    const wrongToken = await downloadApplicationDocument(
+      new Request(`http://localhost/api/applications/${id}/documents/${documentId}/download?token=not-a-real-token`),
+      { params: Promise.resolve({ id, documentId }) }
+    );
+    expect(wrongToken.status).toBe(403);
+  });
+
+  it("lets a reviewer download without a token, and 404s a documentId from a different application", async () => {
+    const { body: appA } = await submitApplication("empresa");
+    const { body: appB } = await submitApplication("fornecedor");
+    const file = new File(["x"], "doc.pdf", { type: "application/pdf" });
+    const formA = new FormData();
+    formA.append("token", appA.token);
+    formA.append("file", file);
+    const uploadedA = await uploadApplicationDocument(
+      requestWithForm(`http://localhost/api/applications/${appA.application.id}/documents`, formA),
+      { params: Promise.resolve({ id: appA.application.id }) }
+    );
+    const documentId = String((await uploadedA.json()).document.id);
+
+    const reviewer = await downloadApplicationDocument(
+      jsonRequest(`http://localhost/api/applications/${appA.application.id}/documents/${documentId}/download`, {
+        method: "GET",
+        session: { userId: 1, accessLevel: "system_admin" },
+      }),
+      { params: Promise.resolve({ id: appA.application.id, documentId }) }
+    );
+    expect(reviewer.status).toBe(200);
+
+    const wrongApplication = await downloadApplicationDocument(
+      new Request(`http://localhost/api/applications/${appB.application.id}/documents/${documentId}/download?token=${appB.token}`),
+      { params: Promise.resolve({ id: appB.application.id, documentId }) }
+    );
+    expect(wrongApplication.status).toBe(404);
+  });
+});
+
+describe("PATCH /api/applications/:id (assignment)", () => {
+  it("assigns to a real coe_manager/system_admin, then unassigns", async () => {
+    const { body } = await submitApplication("empresa");
+    const id = body.application.id;
+    const actor = await makeReviewer("coe_manager");
+    const assignee = await makeReviewer("system_admin");
+
+    const assigned = await reviewApplication(
+      jsonRequest(`http://localhost/api/applications/${id}`, {
+        method: "PATCH",
+        session: { userId: actor.id, accessLevel: "coe_manager" },
+        body: { assignedToUserId: assignee.id },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(assigned.status).toBe(200);
+    expect((await assigned.json()).application.assignedToUserId).toBe(assignee.id);
+
+    const unassigned = await reviewApplication(
+      jsonRequest(`http://localhost/api/applications/${id}`, {
+        method: "PATCH",
+        session: { userId: actor.id, accessLevel: "coe_manager" },
+        body: { assignedToUserId: null },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(unassigned.status).toBe(200);
+    expect((await unassigned.json()).application.assignedToUserId).toBeNull();
+  });
+
+  it("refuses to assign to a non-reviewer, and 403s a non-reviewer session", async () => {
+    const { body } = await submitApplication("empresa");
+    const id = body.application.id;
+    const actor = await makeReviewer("coe_manager");
+    const db = getDb();
+    const [company] = await db.insert(companies).values({ name: "Empresa Assign", domain: uniqueDomain("assign") }).returning();
+    const [requesterUser] = await db
+      .insert(users)
+      .values({ name: "Requisitante", email: `assign-requester-${Date.now()}-${Math.random()}@example.com`, role: "Requisitante", initials: "RQ", companyId: company.id, accessLevel: "requester" })
+      .returning();
+
+    const badAssignee = await reviewApplication(
+      jsonRequest(`http://localhost/api/applications/${id}`, {
+        method: "PATCH",
+        session: { userId: actor.id, accessLevel: "coe_manager" },
+        body: { assignedToUserId: requesterUser.id },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(badAssignee.status).toBe(400);
+
+    const forbidden = await reviewApplication(
+      jsonRequest(`http://localhost/api/applications/${id}`, {
+        method: "PATCH",
+        session: { userId: 1, accessLevel: "requester" },
+        body: { assignedToUserId: actor.id },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
     expect(forbidden.status).toBe(403);
   });
 });

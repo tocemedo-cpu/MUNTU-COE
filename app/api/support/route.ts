@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { supportMessages, supportTickets, users } from "@/db/schema";
 import { getSession } from "@/lib/authz";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { computeSlaDueAt } from "@/lib/support";
 import { parseJsonBody, supportTicketCreateSchema } from "@/lib/validation";
 
@@ -55,8 +56,7 @@ export async function POST(request: Request) {
         .returning();
       created = row;
     } catch (error) {
-      const isUniqueViolation = (error as { code?: string } | undefined)?.code === "23505";
-      if (!isUniqueViolation || attempt === 4) throw error;
+      if (!isUniqueViolation(error) || attempt === 4) throw error;
     }
   }
   if (!created) return Response.json({ error: "Não foi possível criar o pedido de suporte" }, { status: 500 });
