@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, customType, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, customType, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 // Empresa cliente (a "tenant" que compra através do portal). O método de
 // login (SSO federado vs. e-mail/password) é decidido por empresa: o login
@@ -97,6 +97,74 @@ export const purchaseOrders = pgTable("purchase_orders", {
   tier: text("tier").notNull().default("standard"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
 });
+
+// Tender/Sourcing (RFQ) — pedido de cotação a vários fornecedores
+// convidados, com adjudicação a uma proposta que gera a PO. Primeira fase
+// real do pilar Procurement: até agora só existia a emissão de PO a
+// partir de um pedido já aprovado, sem nenhum processo de sourcing
+// concorrencial antes disso.
+export const tenders = pgTable("tenders", {
+  id: text("id").primaryKey(), // "RFQ-2026-####"
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  companyId: bigint("company_id", { mode: "number" })
+    .notNull()
+    .references(() => companies.id),
+  // Opcional — um tender pode nascer de um pedido já aprovado (sourcing
+  // formal antes de emitir a PO) ou ser aberto directamente pela Muntu.
+  requestId: text("request_id").references(() => requests.id),
+  createdByUserId: bigint("created_by_user_id", { mode: "number" })
+    .notNull()
+    .references(() => users.id),
+  deadline: timestamp("deadline", { withTimezone: true }).notNull(),
+  status: text("status").notNull().default("aberto"), // aberto | adjudicado | cancelado
+  // Sem FK para bids de propósito — bids só é declarada a seguir a esta
+  // tabela (evita referência circular na ordem do ficheiro); a
+  // integridade é garantida pela própria rota de adjudicação (só o
+  // handler escreve os dois campos, sempre juntos).
+  awardedBidId: bigint("awarded_bid_id", { mode: "number" }),
+  awardedPoId: text("awarded_po_id").references(() => purchaseOrders.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
+// Fornecedores convidados a um tender — sem convite, um fornecedor nem
+// sequer vê o tender existir (ver GET /api/tenders para requester
+// supplier). Um índice único impede convidar o mesmo fornecedor duas
+// vezes ao mesmo tender.
+export const tenderInvites = pgTable(
+  "tender_invites",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    tenderId: text("tender_id")
+      .notNull()
+      .references(() => tenders.id),
+    supplierId: bigint("supplier_id", { mode: "number" })
+      .notNull()
+      .references(() => suppliers.id),
+  },
+  (table) => [uniqueIndex("tender_invites_tender_supplier_idx").on(table.tenderId, table.supplierId)]
+);
+
+// Proposta de um fornecedor convidado. Um fornecedor só vê a sua própria
+// proposta, nunca as dos concorrentes — ver canAccessBid-style scoping em
+// GET /api/tenders/:id.
+export const bids = pgTable(
+  "bids",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    tenderId: text("tender_id")
+      .notNull()
+      .references(() => tenders.id),
+    supplierId: bigint("supplier_id", { mode: "number" })
+      .notNull()
+      .references(() => suppliers.id),
+    value: bigint("value", { mode: "number" }).notNull(),
+    notes: text("notes").notNull().default(""),
+    status: text("status").notNull().default("submetida"), // submetida | vencedora | rejeitada
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => [uniqueIndex("bids_tender_supplier_idx").on(table.tenderId, table.supplierId)]
+);
 
 export const receipts = pgTable("receipts", {
   id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),

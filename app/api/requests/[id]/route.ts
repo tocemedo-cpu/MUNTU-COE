@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { purchaseOrders, requests } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { classifyPoTier } from "@/lib/billing";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { parseJsonBody, requestActionSchema } from "@/lib/validation";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -79,8 +80,7 @@ async function insertPurchaseOrderWithGeneratedId(db: ReturnType<typeof getDb>, 
       await db.insert(purchaseOrders).values({ id, ...values });
       return id;
     } catch (error) {
-      const isUniqueViolation = (error as { code?: string } | undefined)?.code === "23505";
-      if (!isUniqueViolation || attempt === 4) throw error;
+      if (!isUniqueViolation(error) || attempt === 4) throw error;
     }
   }
   throw new Error("Não foi possível gerar um id de PO único");

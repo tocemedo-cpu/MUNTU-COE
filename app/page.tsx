@@ -21,6 +21,7 @@ import {
   FileText,
   Filter,
   Gauge,
+  Gavel,
   Globe2,
   Handshake,
   Home,
@@ -67,7 +68,7 @@ import { bucketRequestsByMonth, computeAvgCycleDays, computeSlaOnTimePct } from 
 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
-  | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
+  | "tenders" | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
   | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications" | "team";
 
 type RequestItem = {
@@ -570,6 +571,7 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   requests: ["requester", "company_admin", "coe_manager", "system_admin"],
   approvals: ["company_admin", "coe_manager", "system_admin"],
   suppliers: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  tenders: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   pos: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   receipts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
   invoices: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
@@ -595,12 +597,13 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
 const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
   { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }, { id: "team", label: "Equipa", icon: UserCog }] },
   { group: "HOMOLOGAÇÃO", items: [{ id: "applications", label: "Candidaturas", icon: Handshake }] },
+  { group: "SOURCING", items: [{ id: "tenders", label: "Tenders (RFQ)", icon: Gavel }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
   { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
   { group: "SUPORTE", items: [{ id: "support", label: "Suporte", icon: LifeBuoy }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", tenders: "Tenders (RFQ)", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -862,6 +865,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "requests" && <RequestsTable title="Meus pedidos" subtitle="Acompanhe prioridade, responsável, etapa e SLA em tempo real." requests={filteredRequests} onSelect={setSelectedRequest} />}
           {view === "approvals" && <Approvals requests={requests.filter((item) => item.status === "Aprovação")} onAction={actOnRequest} onSelect={setSelectedRequest} />}
           {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />)}
+          {view === "tenders" && <Tenders user={user} suppliersList={suppliersList} />}
           {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} requests={requests} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
@@ -1410,6 +1414,256 @@ function InviteTeamMemberForm({ onCreated, onCancel }: { onCreated: (user: TeamU
       <label className="form-field">E-mail<Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
       <label className="form-field">Nível de acesso<NativeSelect value={accessLevel} onChange={(event) => setAccessLevel(event.target.value as "requester" | "company_admin")} className="field-control"><NativeSelectOption value="requester">Requisitante</NativeSelectOption><NativeSelectOption value="company_admin">Administrador da empresa</NativeSelectOption></NativeSelect></label>
       <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A convidar…" : "Convidar colega"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
+    </form>
+  </section>;
+}
+
+type TenderStatus = "aberto" | "adjudicado" | "cancelado";
+type TenderRow = {
+  id: string;
+  title: string;
+  description: string;
+  companyId: number;
+  requestId: string | null;
+  deadline: string;
+  status: TenderStatus;
+  awardedBidId: number | null;
+  awardedPoId: string | null;
+  createdAt: string;
+};
+type TenderInviteRow = { supplierId: number; supplierName: string };
+type BidStatus = "submetida" | "vencedora" | "rejeitada";
+type TenderBidRow = { id: number; supplierId: number; supplierName: string; value: number; notes: string; status: BidStatus; submittedAt: string };
+type MyBidRow = { id: number; value: number; notes: string; status: BidStatus; submittedAt: string };
+type TenderDetail = { tender: TenderRow; invites: TenderInviteRow[]; bids: TenderBidRow[] } | { tender: TenderRow; myBid: MyBidRow | null };
+
+const TENDER_STATUS_LABEL: Record<TenderStatus, string> = { aberto: "Aberto a propostas", adjudicado: "Adjudicado", cancelado: "Cancelado" };
+function tenderStatusPill(status: TenderStatus) {
+  if (status === "adjudicado") return "status status-green";
+  if (status === "cancelado") return "status status-red";
+  return "status status-amber";
+}
+function isBuyerDetail(detail: TenderDetail): detail is { tender: TenderRow; invites: TenderInviteRow[]; bids: TenderBidRow[] } {
+  return "invites" in detail;
+}
+
+// Sourcing (RFQ): pedido de cotação a fornecedores convidados, com
+// adjudicação a uma proposta que gera a PO — primeira etapa concorrencial
+// do pilar Procurement, antes disso só existia emissão de PO a partir de
+// um pedido já aprovado. A criação fica limitada a quem tem uma origem
+// clara para o companyId no ecrã (Administrador da empresa, pela própria
+// sessão, e System Admin, pela lista de empresas) — analyst/coe_manager
+// já podem gerir e adjudicar tenders existentes, mas ainda não têm aqui
+// forma de escolher a empresa para abrir um novo.
+function Tenders({ user, suppliersList }: { user: AuthUser; suppliersList: Supplier[] }) {
+  const [rows, setRows] = useState<TenderRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+  const [selected, setSelected] = useState<TenderRow | null>(null);
+  const [detail, setDetail] = useState<TenderDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const isSupplier = user.accessLevel === "supplier";
+  const canCreate = user.accessLevel === "company_admin" || user.accessLevel === "system_admin";
+  const canManage = !isSupplier;
+
+  const loadRows = async () => {
+    try {
+      const { tenders } = await api<{ tenders: TenderRow[] }>("/api/tenders");
+      setRows(tenders);
+    } catch {
+      toast.error("Não foi possível carregar os tenders");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRows();
+  }, []);
+
+  const openDetail = async (tender: TenderRow) => {
+    setSelected(tender);
+    setDetail(null);
+    setDetailLoading(true);
+    try {
+      const data = await api<TenderDetail>(`/api/tenders/${tender.id}`);
+      setDetail(data);
+    } catch {
+      toast.error("Não foi possível carregar o detalhe do tender");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const refreshDetail = async () => {
+    if (selected) await openDetail(selected);
+    await loadRows();
+  };
+
+  return <><PageHeader kicker="SOURCING" title="Tenders (RFQ)" description="Peça cotações a vários fornecedores em concorrência e adjudique a melhor proposta." action={canCreate ? <Button className="btn-burgundy" onClick={() => setFormOpen((open) => !open)}><Plus /> Novo tender</Button> : undefined} />
+    {formOpen && <CreateTenderForm user={user} suppliersList={suppliersList} onCreated={(tender) => { setRows((current) => [tender, ...current]); setFormOpen(false); }} onCancel={() => setFormOpen(false)} />}
+    <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Tender</TableHead><TableHead>Título</TableHead><TableHead>Prazo</TableHead><TableHead>Estado</TableHead><TableHead className="text-right">Acção</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><button className="request-link" onClick={() => openDetail(row)}><strong>{row.id}</strong></button></TableCell><TableCell>{row.title}</TableCell><TableCell>{formatSupportDate(row.deadline)}</TableCell><TableCell><span className={tenderStatusPill(row.status)}>{TENDER_STATUS_LABEL[row.status]}</span></TableCell><TableCell className="text-right"><Button size="icon-sm" variant="ghost" onClick={() => openDetail(row)} aria-label={`Abrir ${row.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Gavel /><h3>Sem tenders ainda</h3><p>{isSupplier ? "Ainda não foi convidado para nenhum tender." : "Abra o primeiro tender para começar a pedir cotações."}</p></div>}</div></section>
+    <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
+      <SheetContent className="request-sheet sm:max-w-xl">
+        {selected && <div className="request-detail">
+          <SheetHeader><SheetTitle>{selected.title}</SheetTitle><SheetDescription>{selected.id} — prazo {formatSupportDate(selected.deadline)}</SheetDescription></SheetHeader>
+          <span className={tenderStatusPill(selected.status)}>{TENDER_STATUS_LABEL[selected.status]}</span>
+          {selected.description && <p className="muted">{selected.description}</p>}
+          {detailLoading && <p className="muted">A carregar…</p>}
+          {detail && isBuyerDetail(detail) && <BuyerTenderDetail detail={detail} canManage={canManage} onChanged={refreshDetail} />}
+          {detail && !isBuyerDetail(detail) && <SupplierTenderDetail tender={detail.tender} myBid={detail.myBid} onChanged={refreshDetail} />}
+        </div>}
+      </SheetContent>
+    </Sheet>
+  </>;
+}
+
+function BuyerTenderDetail({ detail, canManage, onChanged }: { detail: { tender: TenderRow; invites: TenderInviteRow[]; bids: TenderBidRow[] }; canManage: boolean; onChanged: () => void }) {
+  const { tender, invites, bids } = detail;
+  const [busy, setBusy] = useState(false);
+  const sortedBids = [...bids].sort((a, b) => a.value - b.value);
+
+  const award = async (bidId: number) => {
+    setBusy(true);
+    try {
+      await api(`/api/tenders/${tender.id}/award`, { method: "POST", body: JSON.stringify({ bidId }) });
+      toast.success("Tender adjudicado — PO gerada");
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível adjudicar");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    setBusy(true);
+    try {
+      await api(`/api/tenders/${tender.id}`, { method: "PATCH", body: JSON.stringify({ action: "cancel" }) });
+      toast.success("Tender cancelado");
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível cancelar");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <>
+    <div><p className="muted">Fornecedores convidados</p><p>{invites.map((invite) => invite.supplierName).join(", ") || "—"}</p></div>
+    <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Valor</TableHead><TableHead>Estado</TableHead>{tender.status === "aberto" && canManage && <TableHead></TableHead>}</TableRow></TableHeader><TableBody>
+      {sortedBids.map((bid) => <TableRow key={bid.id}><TableCell>{bid.supplierName}</TableCell><TableCell>{money(bid.value)}</TableCell><TableCell><span className={bid.status === "vencedora" ? "status status-green" : bid.status === "rejeitada" ? "status status-red" : "status status-slate"}>{bid.status === "submetida" ? "Submetida" : bid.status === "vencedora" ? "Vencedora" : "Rejeitada"}</span></TableCell>
+        {tender.status === "aberto" && canManage && <TableCell><Button size="sm" disabled={busy} onClick={() => award(bid.id)}>Adjudicar</Button></TableCell>}
+      </TableRow>)}
+    </TableBody></Table>{bids.length === 0 && <p className="muted">Ainda sem propostas.</p>}</div>
+    {tender.status === "aberto" && canManage && <Button variant="outline" disabled={busy} onClick={cancel}>Cancelar tender</Button>}
+    {tender.awardedPoId && <p className="muted">PO gerada: <strong>{tender.awardedPoId}</strong></p>}
+  </>;
+}
+
+function SupplierTenderDetail({ tender, myBid, onChanged }: { tender: TenderRow; myBid: MyBidRow | null; onChanged: () => void }) {
+  const [value, setValue] = useState(myBid ? String(myBid.value) : "");
+  const [notes, setNotes] = useState(myBid?.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const canBid = tender.status === "aberto" && new Date(tender.deadline) > new Date();
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await api(`/api/tenders/${tender.id}/bids`, { method: "POST", body: JSON.stringify({ value: Number(value), notes }) });
+      toast.success(myBid ? "Proposta actualizada" : "Proposta enviada");
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível enviar a proposta");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <>
+    {myBid && <div><p className="muted">A sua proposta</p><p><strong>{money(myBid.value)}</strong> — <span className={myBid.status === "vencedora" ? "status status-green" : myBid.status === "rejeitada" ? "status status-red" : "status status-slate"}>{myBid.status === "submetida" ? "Submetida" : myBid.status === "vencedora" ? "Vencedora" : "Rejeitada"}</span></p></div>}
+    {canBid ? <form onSubmit={submit} className="form-grid">
+      <label className="form-field">Valor da proposta (AOA)<Input type="number" min={0} value={value} onChange={(event) => setValue(event.target.value)} required /></label>
+      <label className="form-field">Notas (opcional)<Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} /></label>
+      <Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A enviar…" : myBid ? "Actualizar proposta" : "Enviar proposta"} <ArrowRight /></Button>
+    </form> : <p className="muted">{tender.status !== "aberto" ? "Este tender já não está aberto a propostas." : "O prazo para propostas já terminou."}</p>}
+  </>;
+}
+
+function CreateTenderForm({
+  user,
+  suppliersList,
+  onCreated,
+  onCancel,
+}: {
+  user: AuthUser;
+  suppliersList: Supplier[];
+  onCreated: (tender: TenderRow) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [supplierIds, setSupplierIds] = useState<number[]>([]);
+  const [companyId, setCompanyId] = useState("");
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const needsCompany = user.accessLevel === "system_admin";
+
+  useEffect(() => {
+    if (!needsCompany) return;
+    (async () => {
+      try {
+        const { companies } = await api<{ companies: CompanyOption[] }>("/api/admin/companies");
+        setCompanyOptions(companies);
+      } catch {
+        toast.error("Não foi possível carregar as empresas");
+      }
+    })();
+  }, [needsCompany]);
+
+  const toggleSupplier = (id: number) => {
+    setSupplierIds((current) => (current.includes(id) ? current.filter((existing) => existing !== id) : [...current, id]));
+  };
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (supplierIds.length === 0) {
+      toast.error("Convide pelo menos um fornecedor");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { tender } = await api<{ tender: TenderRow }>("/api/tenders", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          description: description || undefined,
+          deadline: new Date(deadline).toISOString(),
+          supplierIds,
+          companyId: needsCompany && companyId ? Number(companyId) : undefined,
+        }),
+      });
+      toast.success(`${tender.id} aberto — fornecedores convidados`);
+      onCreated(tender);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível abrir o tender");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section className="panel">
+    <form onSubmit={submit} className="form-grid">
+      <label className="form-field">Título<Input value={title} onChange={(event) => setTitle(event.target.value)} required autoFocus /></label>
+      <label className="form-field">Descrição (opcional)<Textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} /></label>
+      <label className="form-field">Prazo para propostas<Input type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} required /></label>
+      {needsCompany && <label className="form-field">Empresa<NativeSelect value={companyId} onChange={(event) => setCompanyId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{companyOptions.map((company) => <NativeSelectOption key={company.id} value={company.id}>{company.name}</NativeSelectOption>)}</NativeSelect></label>}
+      <div className="form-field"><span>Fornecedores a convidar</span><div className="checkbox-list">{suppliersList.map((supplier) => <label key={supplier.id}><input type="checkbox" checked={supplierIds.includes(supplier.id)} onChange={() => toggleSupplier(supplier.id)} /> {supplier.name}</label>)}</div></div>
+      <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A abrir…" : "Abrir tender"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
     </form>
   </section>;
 }

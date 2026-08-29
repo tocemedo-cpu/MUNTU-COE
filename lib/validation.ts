@@ -198,3 +198,28 @@ export const applicationReviewSchema = z.union([
 export const applicationAssignSchema = z.object({
   assignedToUserId: z.number().int().positive().nullable(),
 });
+
+// Tender/Sourcing (RFQ) — ver POST /api/tenders. companyId só é usado (e
+// obrigatório) quando quem cria não tem uma empresa própria na sessão
+// (coe_manager/system_admin); para um company_admin vem sempre da
+// sessão, nunca deste campo — mesma razão de segurança de
+// companyUserInviteSchema.
+export const tenderCreateSchema = z.object({
+  title: z.string().trim().min(1, "O título é obrigatório").max(200),
+  description: z.string().trim().max(2000).optional(),
+  deadline: z.string().trim().min(1, "Indique o prazo para propostas"),
+  requestId: z.string().trim().max(40).optional(),
+  companyId: z.number().int().positive().optional(),
+  supplierIds: z.array(z.number().int().positive()).min(1, "Convide pelo menos um fornecedor"),
+});
+
+export const tenderActionSchema = z.object({ action: z.literal("cancel") });
+
+export const bidCreateSchema = z.object({
+  value: z.number().int().min(0, "O valor da proposta é obrigatório"),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export const tenderAwardSchema = z.object({
+  bidId: z.number().int().positive(),
+});

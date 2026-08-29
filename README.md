@@ -126,7 +126,7 @@ Para activar o envio real: crie uma conta em [brevo.com](https://brevo.com), ger
 
 Ao contrário do Resend (usado antes), o Brevo não tem um remetente de teste partilhado que funcione sem qualquer configuração — mas em troca, assim que o remetente está verificado, entrega a **qualquer** destinatário, não só ao e-mail da própria conta. É por isso que aqui as duas variáveis (`BREVO_API_KEY` e `BREVO_FROM_EMAIL`) são exigidas em conjunto: sem remetente verificado não há envio possível, por isso não faz sentido tentar com só a API key definida.
 
-**Limitação conhecida:** o token é reutilizável dentro da janela de 30 minutos (sem registo de "já usado" numa tabela) — mais simples de implementar e testar, ao custo de uma janela pequena onde o mesmo link, se interceptado, podia repor a password mais do que uma vez.
+O token é de uso único (ver §Tokens de uso único abaixo) — uma segunda tentativa com o mesmo link já falha, mesmo dentro da janela de 30 minutos.
 
 ## Suporte (caixa de entrada de pedidos)
 
@@ -183,9 +183,20 @@ Os tokens de "definir palavra-passe" (recuperação de acesso e boas-vindas da h
 
 Deliberadamente **não** aplicado ao token de acesso à candidatura (`application_access`): esse precisa de continuar a servir vários pedidos (consultar estado, anexar mais do que um documento) ao longo da janela de 30 dias — torná-lo de uso único quebraria o fluxo, não é o mesmo tipo de token que os de "definir password uma vez".
 
-Ao escrever o teste deste comportamento, uma colisão real forçada expôs um bug latente na verificação `error.code === "23505"` já usada em quatro sítios (geração de id com nova tentativa em `requests`/`support_tickets`/`applications`, mais este `consumed_tokens` novo): o driver por vezes embrulha o erro real do Postgres num wrapper com `.cause`, e nesses casos `error.code` fica `undefined` — a "nova tentativa em caso de colisão" nunca disparava de verdade, só se via a colisão a ser relançada. Extraído para `lib/db-errors.ts#isUniqueViolation` (verifica os dois sítios), usado pelos quatro. `tests/integration/id-collision-retry.test.ts` força a mesma colisão real contra `/api/requests` para garantir que a correcção fica coberta.
+Ao escrever o teste deste comportamento, uma colisão real forçada expôs um bug latente na verificação `error.code === "23505"` já usada nesses sítios: o driver por vezes embrulha o erro real do Postgres num wrapper com `.cause`, e nesses casos `error.code` fica `undefined` — a "nova tentativa em caso de colisão" nunca disparava de verdade, só se via a colisão a ser relançada. Extraído para `lib/db-errors.ts#isUniqueViolation` (verifica os dois sítios) e aplicado a todos os geradores de id com nova tentativa do projecto: `requests`, `support_tickets`, `applications`, `purchase_orders` (incluindo a PO gerada pela adjudicação de um tender), `client_invoices` e `consumed_tokens`. `tests/integration/id-collision-retry.test.ts` e `tests/integration/billing.test.ts` forçam a mesma colisão real contra `/api/requests` e `/api/admin/billing` para garantir que a correcção fica coberta.
 
 **Limitação conhecida (fica para depois):** Supplier Development (o terceiro dos três pilares operacionais da Muntu COE) continua sem mudanças.
+
+## Sourcing — Tenders / RFQ (primeira etapa concorrencial do Procurement)
+
+Até aqui, uma PO só nascia de um pedido já aprovado (`PATCH /api/requests/:id` com `action: "approve"`) — não havia nenhum processo de pedir cotações a vários fornecedores em concorrência antes de emitir a PO. `tenders`/`tender_invites`/`bids` (tabelas novas) modelam esse processo: **Aberto → Propostas → Adjudicado**.
+
+1. **Abrir um tender** — `POST /api/tenders` (ecrã **Tenders (RFQ)**, `company_admin`/`analyst`/`coe_manager`/`system_admin`). Cria o tender e já convida os fornecedores indicados na mesma transacção — um tender sem nenhum convite não tem utilidade nenhuma. O `companyId` nunca vem do corpo para um `company_admin` (sempre `session.companyId`, mesma regra de `companyUserInviteSchema`/`tenderCreateSchema`); os outros papéis têm de o indicar. No ecrã, a criação está limitada por agora a `company_admin` (empresa da sessão) e `system_admin` (escolhe a empresa de uma lista) — os únicos dois papéis com uma fonte clara de `companyId` no interface; `analyst`/`coe_manager` já conseguem gerir e adjudicar tenders existentes pela API, mas ainda sem um selector de empresa no ecrã para abrir um novo.
+2. **Propor** — `POST /api/tenders/:id/bids`, só `supplier`, só se convidado (`tender_invites`), só enquanto `status = "aberto"` e o prazo não passou. Um fornecedor só pode ter uma proposta por tender (índice único `tenders_id+supplier_id`) — reenviar substitui o valor/notas da proposta anterior (`ON CONFLICT DO UPDATE`) em vez de criar uma segunda linha.
+3. **Ver o detalhe** — `GET /api/tenders/:id` devolve formas diferentes consoante quem pergunta: o comprador vê a lista de convidados e **todas** as propostas; um fornecedor vê só a sua própria (`myBid`) — nunca as dos concorrentes, mesmo sendo o mesmo tender.
+4. **Adjudicar** — `POST /api/tenders/:id/award`, mesmos papéis de criação. Marca a proposta escolhida `vencedora`, todas as outras `rejeitada`, fecha o tender (`status: "adjudicado"`) e gera a PO — tudo numa única transacção, para nunca ficar um tender adjudicado sem PO nem uma PO órfã sem tender fechado. A PO nasce com `tier: "complexo"` fixo (`lib/billing.ts`): uma RFQ concorrencial já implica mais esforço da Muntu do que uma PO standard assistida, e não há "Tipo de transacção" nenhum (como há num pedido normal) para classificar de outra forma.
+
+`middleware.ts` ganhou `{ prefix: "/api/tenders", allow: [...] }` incluindo `supplier` — o âmbito real (só os tenders para que foi convidado, nunca a lista completa de sourcing de outra empresa) é feito no próprio handler, não pelo prefixo.
 
 ## Rotas de API
 
@@ -234,6 +245,10 @@ Ao escrever o teste deste comportamento, uma colisão real forçada expôs um bu
 | `/api/applications/:id/documents` | `POST` | Upload pelo próprio candidato — `multipart/form-data`, campos `file` e `token` |
 | `/api/applications/:id/documents/:documentId/download` | `GET` | Download pelo próprio candidato (`?token=`) ou por sessão interna |
 | `/api/applications/:id/homologate` | `POST` | Cria a empresa/fornecedor + primeiro utilizador a partir de uma candidatura `aprovada` (só `coe_manager`/`system_admin`) |
+| `/api/tenders` | `GET`, `POST` | `GET`: lista escopada (fornecedor: só convidado; `company_admin`: só a sua empresa; interno: todos); `POST`: abre tender + convida fornecedores (`company_admin`/`analyst`/`coe_manager`/`system_admin`) |
+| `/api/tenders/:id` | `GET`, `PATCH` | `GET`: detalhe — todas as propostas para o comprador, só a própria para um fornecedor; `PATCH`: cancela um tender ainda aberto |
+| `/api/tenders/:id/bids` | `POST` | Submete/actualiza a proposta do próprio fornecedor convidado (upsert) |
+| `/api/tenders/:id/award` | `POST` | Adjudica uma proposta — marca vencedora/rejeitadas, fecha o tender e gera a PO |
 
 Todas as rotas excepto `/api/auth/login`, `/api/auth/logout`, `/api/public-stats` e `/api/applications*` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão. `/api/applications*` é a excepção mista: nunca bloqueia por falta de sessão (o candidato não tem nenhuma), mas continua a autenticar quando existe uma — ver secção "Candidaturas e homologação" acima.
 
