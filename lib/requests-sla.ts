@@ -52,6 +52,17 @@ export function computeAvgCycleDays(items: RequestSlaRow[]): number {
   return Math.round(avgDays * 10) / 10;
 }
 
+// Tempo entre o alerta inicial e o escalonamento para a liderança Muntu
+// (coe_manager/system_admin), se o pedido continuar por decidir — ver
+// /api/admin/sla-alerts/run.
+export const REQUEST_SLA_ESCALATION_DELAY_HOURS = 24;
+
+export function shouldEscalateRequest(slaAlertedAt: Date | string | null, decidedAt: Date | string | null, now: Date = new Date()): boolean {
+  if (slaAlertedAt == null || decidedAt != null) return false;
+  const hoursSinceAlert = (now.getTime() - new Date(slaAlertedAt).getTime()) / (60 * 60 * 1000);
+  return hoursSinceAlert >= REQUEST_SLA_ESCALATION_DELAY_HOURS;
+}
+
 export type MonthlyTrendBucket = { label: string; count: number; slaPct: number };
 
 // Agrupa por mês de criação (createdAt) os últimos `monthsBack` meses,

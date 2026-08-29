@@ -26,3 +26,14 @@ export function isSlaBreached(slaDueAt: Date | string, status: SupportStatus, no
   if (status === "resolvido" || status === "fechado") return false;
   return new Date(slaDueAt).getTime() < now.getTime();
 }
+
+// Tempo entre o alerta inicial e o escalonamento (sempre para todo o
+// System Admin, já é o topo da caixa de suporte) — ver
+// /api/admin/sla-alerts/run.
+export const SUPPORT_SLA_ESCALATION_DELAY_HOURS = 24;
+
+export function shouldEscalateTicket(slaAlertedAt: Date | string | null, status: SupportStatus, now: Date = new Date()): boolean {
+  if (slaAlertedAt == null || status === "resolvido" || status === "fechado") return false;
+  const hoursSinceAlert = (now.getTime() - new Date(slaAlertedAt).getTime()) / (60 * 60 * 1000);
+  return hoursSinceAlert >= SUPPORT_SLA_ESCALATION_DELAY_HOURS;
+}

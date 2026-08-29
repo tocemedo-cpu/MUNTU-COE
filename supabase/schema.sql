@@ -73,6 +73,13 @@ alter table public.requests add column if not exists type text not null default 
 alter table public.requests add column if not exists sla_due_at timestamptz;
 alter table public.requests add column if not exists decided_at timestamptz;
 
+-- Preenchidos por /api/admin/sla-alerts/run (agendador externo via
+-- CRON_SECRET) na primeira vez que um alerta/escalonamento de SLA é
+-- enviado — só para não reenviar o mesmo e-mail em cada corrida, não é
+-- estado de negócio.
+alter table public.requests add column if not exists sla_alerted_at timestamptz;
+alter table public.requests add column if not exists sla_escalated_at timestamptz;
+
 create table if not exists public.suppliers (
   id bigint generated always as identity primary key,
   name text not null unique,
@@ -320,6 +327,12 @@ create table if not exists public.support_tickets (
   updated_at timestamptz not null default now(),
   resolved_at timestamptz
 );
+
+-- Mesmo mecanismo/razão de requests.sla_alerted_at/sla_escalated_at —
+-- `alter ... add column if not exists`, não embutido no `create table`
+-- acima, porque esta tabela já existe em produção sem estas colunas.
+alter table public.support_tickets add column if not exists sla_alerted_at timestamptz;
+alter table public.support_tickets add column if not exists sla_escalated_at timestamptz;
 
 create table if not exists public.support_messages (
   id bigint generated always as identity primary key,

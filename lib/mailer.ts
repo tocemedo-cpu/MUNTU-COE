@@ -68,3 +68,27 @@ export async function sendWelcomeSetPasswordEmail(email: string, name: string, s
     devLogLabel: "o e-mail de boas-vindas",
   });
 }
+
+// Alerta de SLA vencido — enviado por /api/admin/sla-alerts/run (agendador
+// externo) a quem pode decidir o item (aprovadores da empresa para um
+// pedido, responsável ou System Admin para um ticket).
+export async function sendSlaAlertEmail(email: string, params: { label: string; entityId: string; portalUrl: string }): Promise<void> {
+  await sendBrevoEmail({
+    to: email,
+    subject: `SLA vencido — ${params.entityId} — Muntu COE`,
+    html: `<p>${params.label} <strong>${params.entityId}</strong> ultrapassou o prazo de SLA e continua por decidir.</p><p><a href="${params.portalUrl}">Ver no portal</a></p>`,
+    devLogLabel: `o alerta de SLA de ${params.entityId}`,
+  });
+}
+
+// Escalonamento — enviado quando o item continua por decidir passado o
+// tempo de tolerância desde o alerta inicial (ver
+// REQUEST_SLA_ESCALATION_DELAY_HOURS/SUPPORT_SLA_ESCALATION_DELAY_HOURS).
+export async function sendSlaEscalationEmail(email: string, params: { label: string; entityId: string; portalUrl: string }): Promise<void> {
+  await sendBrevoEmail({
+    to: email,
+    subject: `Escalonamento de SLA — ${params.entityId} — Muntu COE`,
+    html: `<p>${params.label} <strong>${params.entityId}</strong> continua por decidir muito tempo depois do alerta inicial de SLA vencido e foi escalonado para a sua atenção.</p><p><a href="${params.portalUrl}">Ver no portal</a></p>`,
+    devLogLabel: `o escalonamento de SLA de ${params.entityId}`,
+  });
+}

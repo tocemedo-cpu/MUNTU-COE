@@ -70,6 +70,13 @@ export const requests = pgTable("requests", {
   // Preenchido quando o pedido é aprovado ou rejeitado (app/api/requests/
   // [id]/route.ts). Nulo enquanto o pedido aguarda decisão.
   decidedAt: timestamp("decided_at", { withTimezone: true }),
+  // Preenchidos por /api/admin/sla-alerts/run (agendador externo via
+  // CRON_SECRET) na primeira vez que um alerta/escalonamento de SLA é
+  // enviado — nunca por uma acção de utilizador. Servem só para não
+  // reenviar o mesmo e-mail em cada corrida do agendador; não são um
+  // estado de negócio (ver lib/requests-sla.ts).
+  slaAlertedAt: timestamp("sla_alerted_at", { withTimezone: true }),
+  slaEscalatedAt: timestamp("sla_escalated_at", { withTimezone: true }),
 });
 
 export const suppliers = pgTable("suppliers", {
@@ -408,6 +415,10 @@ export const supportTickets = pgTable("support_tickets", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  // Mesmo mecanismo/razão de requests.sla_alerted_at/sla_escalated_at —
+  // ver /api/admin/sla-alerts/run.
+  slaAlertedAt: timestamp("sla_alerted_at", { withTimezone: true }),
+  slaEscalatedAt: timestamp("sla_escalated_at", { withTimezone: true }),
 });
 
 export const supportMessages = pgTable("support_messages", {

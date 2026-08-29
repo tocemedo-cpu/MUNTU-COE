@@ -207,6 +207,17 @@ Antes disto, um fornecimento continuado (manutenção anual, call-off) não tinh
 - **Documentos** — o contrato em si (PDF assinado, aditamentos) anexa-se pelo mecanismo geral de documentos por entidade (`entityType: "contract"`, `lib/document-access.ts`), com o mesmo âmbito de dono/mesma-empresa/mesmo-fornecedor das outras entidades.
 - **Âmbito de leitura** — um `supplier` só vê os seus próprios contratos, um `company_admin` só os da sua empresa (`GET /api/contracts`) — mesmo padrão de `/api/purchase-orders`.
 
+## Alertas de SLA + escalonamento
+
+Até aqui, "SLA vencido" só era mostrado a quem já estivesse a olhar para o pedido/ticket certo (a barra de notificações, o texto "SLA vencido" na tabela) — ninguém era avisado activamente, e nada distinguia um SLA vencido há 5 minutos de um vencido há 5 dias sem ninguém decidir. `POST /api/admin/sla-alerts/run` fecha essa lacuna, no mesmo padrão de `generate-monthly` acima: **não corre sozinha**, precisa de ser chamada periodicamente por um agendador externo com o header `x-cron-secret: <CRON_SECRET>`.
+
+Em cada corrida:
+
+1. **Alerta** — um pedido por decidir (`decided_at` nulo) com o SLA vencido, ou um ticket de suporte aberto/em curso com o SLA vencido, que ainda não foi alertado (`sla_alerted_at` nulo), recebe um e-mail (`sendSlaAlertEmail`, `lib/mailer.ts`) para quem pode decidir: os `company_admin` da empresa do pedido (ou `system_admin`, se o pedido não tiver empresa/nenhum `company_admin`); o responsável atribuído do ticket, ou todo o `system_admin` se ainda não estiver atribuído a ninguém. `sla_alerted_at` fica gravado nesse momento — é o que impede o mesmo alerta de ser reenviado em cada corrida seguinte.
+2. **Escalonamento** — se o item continuar por decidir/resolver `REQUEST_SLA_ESCALATION_DELAY_HOURS`/`SUPPORT_SLA_ESCALATION_DELAY_HOURS` (24h, `lib/requests-sla.ts`/`lib/support.ts`) depois do alerta, é escalonado uma única vez (`sla_escalated_at`) para a liderança Muntu (`coe_manager`/`system_admin` no caso de um pedido; todo o `system_admin` no caso de um ticket, já que é o próprio topo da caixa de suporte).
+
+`sla_alerted_at`/`sla_escalated_at` (colunas novas em `requests`/`support_tickets`) existem só para este controlo de "já enviado" — nunca são lidos como estado de negócio fora desta rota, mesma disciplina de `consumed_tokens` para tokens de uso único.
+
 ## Catálogo (preços pré-negociados para "PO catalogado")
 
 O wizard de novo pedido já tinha "PO catalogado" como tipo de transacção (tier automático de facturação, `lib/billing-tiers.ts`) desde uma ronda anterior — mas sem nenhum catálogo real por trás, era só um texto à escolha sem preços nenhuns associados. `catalog_items` (tabela nova) fecha essa lacuna:
@@ -252,6 +263,7 @@ Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo
 | `/api/admin/billing` | `GET`, `POST` | Lista/gera facturas de cobrança a clientes (só `system_admin`) |
 | `/api/admin/billing/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar/enviar à contabilidade (só `system_admin`) |
 | `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |
+| `/api/admin/sla-alerts/run` | `POST` | Alertas de SLA vencido + escalonamento — autenticada por `CRON_SECRET`, não por sessão |
 | `/api/admin/billing-rates` | `GET` | Lista as tarifas de facturação (só `system_admin`) |
 | `/api/admin/billing-rates/:key` | `PATCH` | Actualiza o valor de uma tarifa (só `system_admin`) |
 | `/api/support` | `GET`, `POST` | Pedidos de suporte — `GET` lista os próprios (todos para `system_admin`); `POST` abre um pedido com mensagem inicial |
@@ -289,6 +301,8 @@ Este repositório inclui um `render.yaml` (Render Blueprint).
 **`npm run db:apply-schema`** (`scripts/apply-schema.ts`) aplica `supabase/schema.sql` à base de dados de `DATABASE_URL` em cada deploy — sem isto, produção ficava atrás do código real sempre que uma tabela/coluna nova era adicionada (aconteceu três vezes: `support_tickets`, `documents.entity_type`/`entity_id`, `applications`), porque colar o ficheiro no SQL Editor do Supabase era um passo manual, fácil de esquecer. Seguro de correr em todos os deploys: o próprio `schema.sql` só usa `create table if not exists`/`add column if not exists`/`drop policy if exists`, por isso reaplicá-lo nunca apaga nem duplica nada — só cria o que ainda falta. Sem `DATABASE_URL` definida (ex.: primeiro deploy antes de a configurar), o script avisa e sai sem falhar o build.
 
 Alternativa sem Blueprint: criar manualmente um **Web Service** em Render → ligar o repositório → *Environment*: Node → *Build Command*: `npm ci && npm run build` → *Start Command*: `npm run start` → adicionar `DATABASE_URL` nas *Environment Variables*.
+
+**Agendamento externo:** o Web Service por si só não corre `POST /api/admin/billing/generate-monthly` nem `POST /api/admin/sla-alerts/run` — as duas precisam de um agendador externo (Render Cron Job num plano pago, GitHub Actions, cron-job.org, ...) a chamá-las periodicamente com o header `x-cron-secret: <CRON_SECRET>` (o mesmo valor gerado pelo Blueprint em `render.yaml`).
 
 ## Base de dados
 

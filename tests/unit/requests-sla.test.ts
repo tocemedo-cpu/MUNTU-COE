@@ -5,6 +5,7 @@ import {
   computeRequestSlaDueAt,
   computeSlaOnTimePct,
   isRequestSlaBreached,
+  shouldEscalateRequest,
 } from "@/lib/requests-sla";
 
 describe("computeRequestSlaDueAt", () => {
@@ -38,6 +39,26 @@ describe("isRequestSlaBreached", () => {
   it("for a pending request, is breached only once 'now' passes the due date", () => {
     expect(isRequestSlaBreached(due, null, new Date("2026-08-28T13:59:00Z"))).toBe(false);
     expect(isRequestSlaBreached(due, null, new Date("2026-08-28T14:01:00Z"))).toBe(true);
+  });
+});
+
+describe("shouldEscalateRequest", () => {
+  const alertedAt = new Date("2026-08-28T14:00:00Z");
+
+  it("never escalates before an alert was ever sent", () => {
+    expect(shouldEscalateRequest(null, null, new Date("2026-08-29T14:00:00Z"))).toBe(false);
+  });
+
+  it("never escalates once the request has been decided", () => {
+    expect(shouldEscalateRequest(alertedAt, new Date("2026-08-28T15:00:00Z"), new Date("2026-08-29T20:00:00Z"))).toBe(false);
+  });
+
+  it("does not escalate before the delay has elapsed since the alert", () => {
+    expect(shouldEscalateRequest(alertedAt, null, new Date("2026-08-29T13:59:00Z"))).toBe(false);
+  });
+
+  it("escalates once 24h have passed since the alert with no decision", () => {
+    expect(shouldEscalateRequest(alertedAt, null, new Date("2026-08-29T14:01:00Z"))).toBe(true);
   });
 });
 
