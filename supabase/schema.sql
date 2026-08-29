@@ -201,6 +201,31 @@ create table if not exists public.document_files (
   content bytea not null
 );
 
+-- Candidatura de uma empresa ou fornecedor ao Centro de Excelência — o
+-- primeiro contacto real com a plataforma, para quem ainda não tem conta
+-- nenhuma. Só a homologação (aprovada -> homologada) cria de facto a
+-- empresa/fornecedor e o primeiro utilizador — ver app/api/applications.
+create table if not exists public.applications (
+  id text primary key, -- "CAND-2026-####"
+  kind text not null, -- empresa | fornecedor
+  company_name text not null,
+  tax_id text not null,
+  sector text not null default '',
+  contact_name text not null,
+  contact_email text not null,
+  contact_phone text not null default '',
+  notes text not null default '',
+  status text not null default 'recebida', -- recebida | em_avaliacao | aprovada | rejeitada | homologada
+  rejection_reason text,
+  reviewed_by_user_id bigint references public.users (id),
+  reviewed_at timestamptz,
+  homologated_at timestamptz,
+  created_company_id bigint references public.companies (id),
+  created_supplier_id bigint references public.suppliers (id),
+  created_user_id bigint references public.users (id),
+  created_at timestamptz not null default now()
+);
+
 -- Caixa de suporte: qualquer utilizador autenticado pode abrir um pedido;
 -- só o System Admin vê a caixa de entrada completa. Ver lib/support.ts
 -- para o cálculo do prazo de SLA por prioridade.
@@ -274,6 +299,7 @@ create index if not exists idx_requests_supplier on public.requests (supplier);
 create index if not exists idx_invoices_status on public.invoices (status);
 create index if not exists idx_exceptions_resolved on public.exceptions (resolved);
 create index if not exists idx_payment_batches_released on public.payment_batches (released);
+create index if not exists idx_applications_status on public.applications (status);
 
 -- -----------------------------------------------------------------
 -- Row Level Security
@@ -300,6 +326,7 @@ alter table public.client_invoices enable row level security;
 alter table public.client_invoice_lines enable row level security;
 alter table public.support_tickets enable row level security;
 alter table public.support_messages enable row level security;
+alter table public.applications enable row level security;
 
 drop policy if exists "public read requests" on public.requests;
 drop policy if exists "public write requests" on public.requests;
@@ -341,8 +368,9 @@ create policy "public write documents" on public.documents for insert with check
 
 -- Sem política de select em `users`, `companies`, `billing_rates`,
 -- `client_invoices`, `client_invoice_lines`, `document_files`,
--- `support_tickets` nem `support_messages`: mantém-nas ilegíveis pela API
--- pública/anon key (segredos de SSO, dados financeiros, bytes reais dos
+-- `support_tickets`, `support_messages` nem `applications`: mantém-nas
+-- ilegíveis pela API pública/anon key (segredos de SSO, dados financeiros,
+-- dados de candidatos, bytes reais dos
 -- ficheiros carregados e conteúdo de pedidos de suporte dos utilizadores).
 -- Login, SSO, facturação, upload/download de documentos e a caixa de
 -- suporte só podem correr a partir de rotas de servidor com a service

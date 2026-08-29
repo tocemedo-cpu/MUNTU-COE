@@ -17,6 +17,18 @@ export function getSession(request: Request): RequestSession {
   };
 }
 
+/** Como getSession, mas devolve null em vez de uma sessão falsa de
+ * "requester" quando não há nenhum cookie válido — para rotas de acesso
+ * misto (ex.: /api/applications), onde o middleware não força sessão e um
+ * visitante sem conta é um caso legítimo, distinto de "sessão inválida". */
+export function getOptionalSession(request: Request): RequestSession | null {
+  const userIdHeader = request.headers.get("x-muntu-user-id");
+  if (!userIdHeader) return null;
+  const userId = Number(userIdHeader);
+  if (!Number.isFinite(userId)) return null;
+  return getSession(request);
+}
+
 /** Devolve uma Response 403 se o nível de acesso não estiver na lista permitida, senão null. */
 export function forbidUnless(request: Request, allowed: AccessLevel[]): Response | null {
   const { accessLevel } = getSession(request);

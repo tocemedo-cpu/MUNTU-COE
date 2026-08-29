@@ -238,6 +238,35 @@ export const documentFiles = pgTable("document_files", {
   content: bytea("content").notNull(),
 });
 
+// Candidatura de uma empresa ("Operadora") ou fornecedor ("Prestadora") ao
+// Centro de Excelência — o primeiro contacto real com a plataforma, para
+// quem ainda não tem conta nenhuma (ver Candidatura → Documentos →
+// Avaliação → Aprovada/Rejeitada → Homologação → Acesso Muntu). Só depois
+// de homologada é que existe de facto uma empresa/fornecedor com um
+// primeiro utilizador — ver `homologate/route.ts`.
+export const applications = pgTable("applications", {
+  id: text("id").primaryKey(), // "CAND-2026-####"
+  kind: text("kind").notNull(), // "empresa" | "fornecedor"
+  companyName: text("company_name").notNull(),
+  taxId: text("tax_id").notNull(),
+  sector: text("sector").notNull().default(""),
+  contactName: text("contact_name").notNull(),
+  contactEmail: text("contact_email").notNull(),
+  contactPhone: text("contact_phone").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  status: text("status").notNull().default("recebida"), // recebida | em_avaliacao | aprovada | rejeitada | homologada
+  rejectionReason: text("rejection_reason"),
+  reviewedByUserId: bigint("reviewed_by_user_id", { mode: "number" }).references(() => users.id),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  homologatedAt: timestamp("homologated_at", { withTimezone: true }),
+  // Preenchidos só pela homologação — a prova real de que esta candidatura
+  // deu origem à empresa/fornecedor/utilizador em causa, não só um estado.
+  createdCompanyId: bigint("created_company_id", { mode: "number" }).references(() => companies.id),
+  createdSupplierId: bigint("created_supplier_id", { mode: "number" }).references(() => suppliers.id),
+  createdUserId: bigint("created_user_id", { mode: "number" }).references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
 // Caixa de suporte: qualquer utilizador autenticado pode abrir um pedido;
 // só o System Admin vê a caixa de entrada completa e pode categorizar,
 // priorizar, atribuir e responder — ver lib/support.ts para o cálculo do

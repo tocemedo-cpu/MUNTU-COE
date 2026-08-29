@@ -68,7 +68,7 @@ import { bucketRequestsByMonth, computeAvgCycleDays, computeSlaOnTimePct } from 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
   | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
-  | "reports" | "repository" | "admin" | "users" | "billing" | "support";
+  | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications";
 
 type RequestItem = {
   id: string;
@@ -95,6 +95,31 @@ type Invoice = { id: string; supplier: string; po: string; value: number; match:
 type ExceptionItem = { id: string; title: string; ref: string; owner: string; cause: string; impact: string; resolved: boolean; createdAt: string };
 type Approver = { id: number; name: string; role: string; accessLevel: AccessLevel };
 type PublicStats = { activeRequests: number; slaOnTimePct: number; avgCycleDays: number } | null;
+type ApplicationStatus = "recebida" | "em_avaliacao" | "aprovada" | "rejeitada" | "homologada";
+type ApplicationItem = {
+  id: string;
+  kind: "empresa" | "fornecedor";
+  companyName: string;
+  taxId: string;
+  sector: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  notes: string;
+  status: ApplicationStatus;
+  rejectionReason: string | null;
+  homologatedAt: string | null;
+  createdAt: string;
+};
+type ApplicationDocument = { id: number; name: string; updated: string };
+
+const APPLICATION_STATUS_LABEL: Record<ApplicationStatus, string> = {
+  recebida: "Recebida",
+  em_avaliacao: "Em avaliação",
+  aprovada: "Aprovada",
+  rejeitada: "Rejeitada",
+  homologada: "Homologada — acesso criado",
+};
 type PaymentBatch = { id: string; date: string; count: number; value: number; status: string; released: boolean };
 type DocumentItem = { id: number; name: string; type: string; request: string; owner: string; version: string; updated: string };
 type AccessLevel = "system_admin" | "coe_manager" | "analyst" | "supplier" | "company_admin" | "requester";
@@ -116,6 +141,12 @@ function formatElapsedPt(fromIso: string): string {
   const days = Math.floor(hours / 24);
   return `${days}d ${String(hours % 24).padStart(2, "0")}h`;
 }
+
+const applicationStatusPill = (status: ApplicationStatus) => {
+  if (status === "rejeitada") return "status status-red";
+  if (status === "aprovada" || status === "homologada") return "status status-green";
+  return "status status-amber"; // recebida | em_avaliacao
+};
 
 const statusClass = (status: string) => {
   if (["Pago", "Activo", "Validada", "Aprovado", "Concluído", "Confirmada"].includes(status)) return "status status-green";
@@ -167,12 +198,25 @@ function Brand({ compact = false, inverse = false, onSecretUnlock }: { compact?:
   </div>;
 }
 
-function PublicSite({ onLogin, onSecretAdminLogin, publicStats }: { onLogin: () => void; onSecretAdminLogin: () => void; publicStats: PublicStats }) {
+function PublicSite({
+  onLogin,
+  onSecretAdminLogin,
+  onCandidatar,
+  publicStats,
+}: {
+  onLogin: () => void;
+  onSecretAdminLogin: () => void;
+  onCandidatar: () => void;
+  publicStats: PublicStats;
+}) {
   return <div className="public-site">
     <header className="public-header">
       <Brand onSecretUnlock={onSecretAdminLogin} />
       <nav aria-label="Navegação principal"><a href="#solucao">Solução</a><a href="#capacidades">Capacidades</a><a href="#modelo">Modelo operacional</a><a href="#expansao">Expansão</a></nav>
-      <Button className="btn-burgundy" onClick={onLogin}>Aceder ao portal <ArrowRight /></Button>
+      <div className="public-header-actions">
+        <Button variant="outline" onClick={onCandidatar}>Candidatar empresa/fornecedor</Button>
+        <Button className="btn-burgundy" onClick={onLogin}>Aceder ao portal <ArrowRight /></Button>
+      </div>
     </header>
 
     <main>
@@ -212,10 +256,182 @@ function PublicSite({ onLogin, onSecretAdminLogin, publicStats }: { onLogin: () 
 
       <section id="expansao" className="public-section expansion-section"><div className="section-heading"><p className="kicker">ANGOLA PRIMEIRO. ÁFRICA A SEGUIR.</p><h2>Especialização sectorial com escala disciplinada.</h2></div><div className="sector-grid"><article className="sector-feature"><img src="/muntu/oilgas-field.png" alt="Profissionais angolanos numa instalação de Oil & Gas" /><div><span>FASE 01</span><h3>Oil & Gas</h3><p>Integridade, MRO, serviços técnicos, logística e operações de elevada criticidade.</p></div></article><article><Pickaxe /><span>FASE 01</span><h3>Minas</h3><p>Fornecimento técnico e cadeias operacionais remotas.</p></article><article><Plane /><span>FASE 01</span><h3>Aviação</h3><p>MRO, materiais críticos e serviços aeroportuários.</p></article><article><Globe2 /><span>FASE 02</span><h3>PALOP e SSA</h3><p>Expansão selectiva após prova operacional em Angola.</p></article></div></section>
 
-      <section className="cta-section"><div><p className="kicker">COMECE COM UM PEDIDO</p><h2>Uma porta de entrada. Execução ponta-a-ponta.</h2></div><Button size="lg" onClick={onLogin}>Aceder ao portal <ArrowRight /></Button></section>
+      <section className="cta-section"><div><p className="kicker">COMECE COM UM PEDIDO</p><h2>Uma porta de entrada. Execução ponta-a-ponta.</h2></div><div className="cta-actions"><Button size="lg" variant="outline" onClick={onCandidatar}>Candidatar empresa/fornecedor</Button><Button size="lg" onClick={onLogin}>Aceder ao portal <ArrowRight /></Button></div></section>
     </main>
     <footer className="public-footer"><Brand inverse /><p>Procurement • Accounts Payable • Compliance • Conteúdo local</p><span>Luanda, Angola • © 2026 Muntu COE</span></footer>
   </div>;
+}
+
+// Primeiro contacto real com a plataforma, para quem ainda não tem conta
+// nenhuma (Candidatura -> Documentos -> Avaliação -> Aprovada/Rejeitada ->
+// Homologação -> Acesso Muntu). Sem sessão: o formulário é público
+// (POST /api/applications) e o acompanhamento do estado é por token — ver
+// lib/application-access.ts e o README, secção "Como um utilizador real
+// chega à plataforma".
+function CandidaturaScreen({
+  onBack,
+  initialApplicationId,
+  initialToken,
+  onLinkConsumed,
+}: {
+  onBack: () => void;
+  initialApplicationId?: string;
+  initialToken?: string;
+  onLinkConsumed: () => void;
+}) {
+  const [applicationId, setApplicationId] = useState<string | undefined>(initialApplicationId);
+  const [token, setToken] = useState<string | undefined>(initialToken);
+  const [application, setApplication] = useState<ApplicationItem | null>(null);
+  const [docs, setDocs] = useState<ApplicationDocument[]>([]);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [kind, setKind] = useState<"empresa" | "fornecedor">("empresa");
+  const [companyName, setCompanyName] = useState("");
+  const [taxId, setTaxId] = useState("");
+  const [sector, setSector] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!applicationId || !token) return;
+    try {
+      window.localStorage.setItem("muntu_application_id", applicationId);
+      window.localStorage.setItem("muntu_application_token", token);
+    } catch {
+      // localStorage indisponível (modo privado, etc.) — sem consequência,
+      // o acompanhamento continua a funcionar dentro desta sessão do browser.
+    }
+    onLinkConsumed();
+  }, [applicationId, token]);
+
+  useEffect(() => {
+    if (applicationId || token) return;
+    try {
+      const storedId = window.localStorage.getItem("muntu_application_id");
+      const storedToken = window.localStorage.getItem("muntu_application_token");
+      if (storedId && storedToken) {
+        setApplicationId(storedId);
+        setToken(storedToken);
+      }
+    } catch {
+      // ver comentário acima
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!applicationId || !token) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingStatus(true);
+      try {
+        const data = await api<{ application: ApplicationItem; documents: ApplicationDocument[] }>(
+          `/api/applications/${encodeURIComponent(applicationId)}?token=${encodeURIComponent(token)}`
+        );
+        if (!cancelled) {
+          setApplication(data.application);
+          setDocs(data.documents);
+        }
+      } catch {
+        if (!cancelled) toast.error("Não foi possível carregar o estado da candidatura — o link pode ter expirado.");
+      } finally {
+        if (!cancelled) setLoadingStatus(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [applicationId, token]);
+
+  const submitApplication = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    try {
+      const data = await api<{ application: ApplicationItem; token: string }>("/api/applications", {
+        method: "POST",
+        body: JSON.stringify({ kind, companyName, taxId, sector, contactName, contactEmail, contactPhone, notes }),
+      });
+      toast.success(`Candidatura ${data.application.id} recebida — enviámos um e-mail de confirmação com o link de acompanhamento.`);
+      setApplication(data.application);
+      setApplicationId(data.application.id);
+      setToken(data.token);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível submeter a candidatura");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const uploadApplicationDocument = async (file: File) => {
+    if (!applicationId || !token) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("token", token);
+      formData.append("file", file);
+      const response = await fetch(`/api/applications/${encodeURIComponent(applicationId)}/documents`, { method: "POST", body: formData });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Não foi possível anexar o documento");
+      setDocs((items) => [data.document as ApplicationDocument, ...items]);
+      toast.success(`${file.name} anexado à candidatura`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível anexar o documento");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (application) {
+    return <main className="candidatura-page">
+      <button className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button>
+      <div className="candidatura-card">
+        <Brand />
+        <p className="kicker">CANDIDATURA {application.id}</p>
+        <h2>{application.companyName}</h2>
+        {loadingStatus ? <p className="muted">A actualizar estado…</p> : <>
+          <span className={statusClass(application.status === "rejeitada" ? "Rejeitado" : application.status === "homologada" ? "Aprovado" : "Pendente")}>{APPLICATION_STATUS_LABEL[application.status]}</span>
+          {application.status === "rejeitada" && application.rejectionReason && <p className="muted">Motivo: {application.rejectionReason}</p>}
+          {application.status === "homologada" && <p className="muted">A sua conta já foi criada — verifique o e-mail {application.contactEmail} para definir a palavra-passe e aceder ao portal.</p>}
+        </>}
+        <div className="sheet-documents">
+          <div className="sheet-documents-head">
+            <h3>Documentos de suporte</h3>
+            <input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) uploadApplicationDocument(file); event.target.value = ""; }} />
+            <Button size="sm" variant="outline" disabled={uploading} onClick={() => fileInputRef.current?.click()}><UploadCloud /> Anexar</Button>
+          </div>
+          {docs.length === 0 ? <p className="muted">Sem documentos anexados.</p> : docs.map((doc) => <div key={doc.id} className="candidatura-doc-row"><FileText /><span><strong>{doc.name}</strong><small>{doc.updated}</small></span></div>)}
+        </div>
+      </div>
+    </main>;
+  }
+
+  return <main className="candidatura-page">
+    <button className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button>
+    <div className="candidatura-card">
+      <Brand />
+      <p className="kicker">CANDIDATURA</p>
+      <h2>Candidate-se ao Muntu COE</h2>
+      <p className="muted">Empresa cliente (&ldquo;Operadora&rdquo;) ou fornecedor (&ldquo;Prestadora&rdquo;) — a candidatura segue avaliação e homologação pela equipa Muntu antes de dar acesso ao portal.</p>
+      <form onSubmit={submitApplication}>
+        <label>Tipo de candidatura
+          <NativeSelect value={kind} onChange={(event) => setKind(event.target.value as "empresa" | "fornecedor")}>
+            <NativeSelectOption value="empresa">Empresa cliente (Operadora)</NativeSelectOption>
+            <NativeSelectOption value="fornecedor">Fornecedor (Prestadora)</NativeSelectOption>
+          </NativeSelect>
+        </label>
+        <label>Nome da empresa<Input value={companyName} onChange={(event) => setCompanyName(event.target.value)} required /></label>
+        <label>NIF<Input value={taxId} onChange={(event) => setTaxId(event.target.value)} required /></label>
+        <label>Sector<Input value={sector} onChange={(event) => setSector(event.target.value)} placeholder="ex.: Oil & Gas, Logística…" /></label>
+        <label>Nome do contacto<Input value={contactName} onChange={(event) => setContactName(event.target.value)} required /></label>
+        <label>E-mail do contacto<Input type="email" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} required /></label>
+        <label>Telefone<Input value={contactPhone} onChange={(event) => setContactPhone(event.target.value)} /></label>
+        <label>Notas<Textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={3} placeholder="Apresentação breve, capacidades, referências…" /></label>
+        <Button type="submit" size="lg" className="btn-burgundy login-submit" disabled={submitting}>{submitting ? "A submeter…" : "Submeter candidatura"} <ArrowRight /></Button>
+      </form>
+    </div>
+  </main>;
 }
 
 function Login({
@@ -432,16 +648,20 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   // vê a caixa de entrada completa — essa distinção fica dentro do
   // próprio componente (ver Support/SupportInbox), não no menu.
   support: ["requester", "company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  // Avaliar/homologar candidaturas (Candidatura -> ... -> Acesso Muntu) é
+  // trabalho da equipa Muntu, não de uma empresa/fornecedor cliente.
+  applications: ["coe_manager", "system_admin"],
 };
 
 const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
   { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }] },
+  { group: "HOMOLOGAÇÃO", items: [{ id: "applications", label: "Candidaturas", icon: Handshake }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
   { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
   { group: "SUPORTE", items: [{ id: "support", label: "Suporte", icon: LifeBuoy }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -459,6 +679,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [exceptionsList, setExceptionsList] = useState<ExceptionItem[]>([]);
   const [paymentBatches, setPaymentBatches] = useState<PaymentBatch[]>([]);
   const [documentsList, setDocumentsList] = useState<DocumentItem[]>([]);
+  const [applicationsList, setApplicationsList] = useState<ApplicationItem[]>([]);
 
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(null);
   const [wizardStep, setWizardStep] = useState(1);
@@ -505,6 +726,12 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           setExceptionsList(exc.exceptions);
           setPaymentBatches(pay.paymentBatches);
           setDocumentsList(doc.documents);
+        }
+
+        if (user.accessLevel === "coe_manager" || user.accessLevel === "system_admin") {
+          const { applications } = await api<{ applications: ApplicationItem[] }>("/api/applications");
+          if (cancelled) return;
+          setApplicationsList(applications);
         }
       } catch {
         if (!cancelled) toast.error("Não foi possível carregar os dados do portal");
@@ -707,6 +934,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "users" && <UsersAdmin />}
           {view === "billing" && <ClientBilling />}
           {view === "support" && <Support user={user} />}
+          {view === "applications" && <Applications applications={applicationsList} onApplicationUpdated={(updated) => setApplicationsList((items) => items.map((item) => (item.id === updated.id ? updated : item)))} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
         </>}
       </main>
     </section>
@@ -1302,6 +1530,134 @@ function formatSupportDate(value: string) {
   return new Date(value).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+// Avaliação e homologação de candidaturas (Candidatura -> Documentos ->
+// Avaliação -> Aprovada/Rejeitada -> Homologação -> Acesso Muntu) — só
+// coe_manager/system_admin veem esta vista (ver VIEW_ROLES). A candidatura
+// em si é submetida sem sessão nenhuma — ver CandidaturaScreen.
+function Applications({
+  applications,
+  onApplicationUpdated,
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  applications: ApplicationItem[];
+  onApplicationUpdated: (application: ApplicationItem) => void;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
+  const [selected, setSelected] = useState<ApplicationItem | null>(null);
+  const pending = applications.filter((item) => item.status === "recebida" || item.status === "em_avaliacao").length;
+  const approved = applications.filter((item) => item.status === "aprovada").length;
+  const homologated = applications.filter((item) => item.status === "homologada").length;
+
+  return <>
+    <PageHeader kicker="HOMOLOGAÇÃO" title="Candidaturas" description="Avaliação e homologação de empresas e fornecedores — o primeiro contacto real com a plataforma." />
+    <section className="supplier-summary">
+      <article><Inbox /><div><strong>{applications.length}</strong><span>Candidaturas recebidas</span></div></article>
+      <article><ClipboardCheck /><div><strong>{pending}</strong><span>Por avaliar</span></div></article>
+      <article><CheckCircle2 /><div><strong>{approved}</strong><span>Aprovadas, por homologar</span></div></article>
+      <article><ShieldCheck /><div><strong>{homologated}</strong><span>Homologadas</span></div></article>
+    </section>
+    <section className="panel">
+      {applications.length === 0 ? <div className="empty-state"><Inbox /><h3>Sem candidaturas</h3><p>Ainda não chegou nenhuma candidatura de empresa ou fornecedor.</p></div> : <div className="responsive-table"><Table>
+        <TableHeader><TableRow><TableHead>Candidatura</TableHead><TableHead>Tipo</TableHead><TableHead>Contacto</TableHead><TableHead>Estado</TableHead><TableHead>Recebida</TableHead><TableHead /></TableRow></TableHeader>
+        <TableBody>{applications.map((application) => <TableRow key={application.id}>
+          <TableCell><strong>{application.companyName}</strong><br /><small className="muted">{application.id}</small></TableCell>
+          <TableCell>{application.kind === "empresa" ? "Empresa" : "Fornecedor"}</TableCell>
+          <TableCell>{application.contactName}<br /><small className="muted">{application.contactEmail}</small></TableCell>
+          <TableCell><span className={applicationStatusPill(application.status)}>{APPLICATION_STATUS_LABEL[application.status]}</span></TableCell>
+          <TableCell>{new Date(application.createdAt).toLocaleDateString("pt-PT")}</TableCell>
+          <TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(application)} aria-label={`Ver candidatura ${application.id}`}><Eye /></Button></TableCell>
+        </TableRow>)}</TableBody>
+      </Table></div>}
+    </section>
+    <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}>
+      <SheetContent className="request-sheet sm:max-w-xl">
+        {selected && <ApplicationReviewSheet
+          application={selected}
+          onUpdated={(updated) => { onApplicationUpdated(updated); setSelected(updated); }}
+          onUploadDocument={onUploadDocument}
+          onDownloadDocument={onDownloadDocument}
+        />}
+      </SheetContent>
+    </Sheet>
+  </>;
+}
+
+function ApplicationReviewSheet({
+  application,
+  onUpdated,
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  application: ApplicationItem;
+  onUpdated: (application: ApplicationItem) => void;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const review = async (status: "em_avaliacao" | "aprovada" | "rejeitada") => {
+    if (status === "rejeitada" && !rejectionReason.trim()) {
+      toast.error("Indique o motivo da rejeição");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { application: updated } = await api<{ application: ApplicationItem }>(`/api/applications/${application.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(status === "rejeitada" ? { status, rejectionReason } : { status }),
+      });
+      onUpdated(updated);
+      toast.success(status === "aprovada" ? "Candidatura aprovada" : status === "rejeitada" ? "Candidatura rejeitada" : "Candidatura em avaliação");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar a candidatura");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const homologate = async () => {
+    setBusy(true);
+    try {
+      const { application: updated } = await api<{ application: ApplicationItem }>(`/api/applications/${application.id}/homologate`, { method: "POST" });
+      onUpdated(updated);
+      toast.success(`${updated.companyName} homologada — acesso criado, e-mail de boas-vindas enviado`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível homologar a candidatura");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <>
+    <SheetHeader><p className="kicker">CANDIDATURA {application.id}</p><SheetTitle>{application.companyName}</SheetTitle><SheetDescription>{application.kind === "empresa" ? "Empresa cliente (Operadora)" : "Fornecedor (Prestadora)"}</SheetDescription></SheetHeader>
+    <div className="sheet-body">
+      <div className="sheet-status"><span className={applicationStatusPill(application.status)}>{APPLICATION_STATUS_LABEL[application.status]}</span></div>
+      <div className="candidatura-detail-grid">
+        <div><small>NIF</small><strong>{application.taxId}</strong></div>
+        <div><small>Sector</small><strong>{application.sector || "—"}</strong></div>
+        <div><small>Contacto</small><strong>{application.contactName}</strong></div>
+        <div><small>E-mail</small><strong>{application.contactEmail}</strong></div>
+        <div><small>Telefone</small><strong>{application.contactPhone || "—"}</strong></div>
+      </div>
+      {application.notes && <p className="muted">{application.notes}</p>}
+      {application.status === "rejeitada" && application.rejectionReason && <p className="muted">Motivo da rejeição: {application.rejectionReason}</p>}
+      {application.status === "em_avaliacao" && <label>Motivo (necessário para rejeitar)<Textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} rows={2} /></label>}
+      <EntityDocuments entityType="application" entityId={application.id} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
+    </div>
+    <div className="sheet-actions">
+      {application.status === "recebida" && <Button className="btn-burgundy" disabled={busy} onClick={() => review("em_avaliacao")}>Iniciar avaliação</Button>}
+      {application.status === "em_avaliacao" && <>
+        <Button variant="outline" className="reject-button" disabled={busy} onClick={() => review("rejeitada")}><XCircle /> Rejeitar</Button>
+        <Button className="btn-green" disabled={busy} onClick={() => review("aprovada")}><Check /> Aprovar</Button>
+      </>}
+      {application.status === "aprovada" && <Button className="btn-burgundy" disabled={busy} onClick={homologate}><ShieldCheck /> Homologar e criar acesso</Button>}
+    </div>
+  </>;
+}
+
 function Support({ user }: { user: AuthUser }) {
   return user.accessLevel === "system_admin" ? <SupportInbox /> : <MyTickets />;
 }
@@ -1542,11 +1898,13 @@ function EntityDocuments({
 function RequestDetail({ request, onAction, canDecide, onUploadDocument, onDownloadDocument }: { request: RequestItem; onAction: (id: string, action: "approve" | "reject") => void; canDecide: boolean; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) { return <><SheetHeader><p className="kicker">DOSSIER DA TRANSACÇÃO</p><SheetTitle>{request.id}</SheetTitle><SheetDescription>{request.subject}</SheetDescription></SheetHeader><div className="sheet-body"><div className="sheet-status"><span className={statusClass(request.status)}>{request.status}</span><span className={request.sla.includes("Vencido") ? "text-danger" : ""}><Clock3 /> {request.sla}</span></div><div className="sheet-value"><small>VALOR</small><strong>{money(request.value)}</strong><p>{request.supplier} • {request.costCenter}</p></div><div className="timeline"><h3>Workflow</h3>{stages.map((stage, index) => <div key={stage} className={index < request.stage ? "complete" : index === request.stage ? "current" : ""}><span>{index < request.stage ? <Check /> : index + 1}</span><div><strong>{stage}</strong><small>{index < request.stage ? "Concluído" : index === request.stage ? "Em curso • Muntu Operations" : "A aguardar"}</small></div></div>)}</div><EntityDocuments entityType="request" entityId={request.id} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} /><div className="audit-note"><ShieldCheck /><span><strong>Auditoria activa</strong>Todas as decisões, alterações e anexos ficam registados.</span></div></div>{canDecide && request.status === "Aprovação" && <div className="sheet-actions"><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div>}</>; }
 
 export default function HomePage() {
-  const [screen, setScreen] = useState<"public" | "login" | "admin-login" | "portal">("public");
+  const [screen, setScreen] = useState<"public" | "login" | "admin-login" | "portal" | "candidatura">("public");
   const [user, setUser] = useState<AuthUser | null>(null);
   const [sessionChecked, setSessionChecked] = useState(false);
   const [ssoError, setSsoError] = useState<string | undefined>(undefined);
   const [resetToken, setResetToken] = useState<string | undefined>(undefined);
+  const [applicationToken, setApplicationToken] = useState<string | undefined>(undefined);
+  const [applicationId, setApplicationId] = useState<string | undefined>(undefined);
   const [publicStats, setPublicStats] = useState<PublicStats>(null);
 
   // Estatísticas reais para o site público e o login (antes do
@@ -1572,17 +1930,27 @@ export default function HomePage() {
   // "admin-login" nunca fica registado no hash da URL — só se chega lá
   // pelo gesto secreto no símbolo (4 cliques), nunca por um link directo
   // ou histórico do browser, o que manteria a existência do ecrã óbvia.
-  const navigate = (next: "public" | "login" | "admin-login" | "portal") => { setScreen(next); if (next !== "admin-login") window.history.replaceState(null, "", next === "public" ? window.location.pathname : `#${next}`); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const navigate = (next: "public" | "login" | "admin-login" | "portal" | "candidatura") => { setScreen(next); if (next !== "admin-login") window.history.replaceState(null, "", next === "public" ? window.location.pathname : `#${next}`); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   useEffect(() => {
     const hash = window.location.hash;
     const params = new URLSearchParams(window.location.search);
     const errorFromSso = params.get("sso_error");
     const tokenFromReset = params.get("reset_token");
+    // Link do e-mail de confirmação de candidatura (Candidatura ->
+    // Documentos): sem sessão nenhuma, o acesso à candidatura é por este
+    // token — ver sendApplicationReceivedEmail em lib/mailer.ts.
+    const tokenFromApplication = params.get("application_token");
+    const idFromApplication = params.get("application_id");
     if (errorFromSso || tokenFromReset) {
       if (errorFromSso) setSsoError(errorFromSso);
       if (tokenFromReset) setResetToken(tokenFromReset);
       window.history.replaceState(null, "", window.location.pathname + "#login");
+    }
+    if (tokenFromApplication && idFromApplication) {
+      setApplicationToken(tokenFromApplication);
+      setApplicationId(idFromApplication);
+      window.history.replaceState(null, "", window.location.pathname + "#candidatura");
     }
     (async () => {
       try {
@@ -1590,15 +1958,18 @@ export default function HomePage() {
         // "sessão expirada" numa visita sem sessão nenhuma — um 401 aqui
         // é o resultado normal de ainda não ter feito login.
         const response = await fetch("/api/auth/me");
-        if (response.ok && !errorFromSso && !tokenFromReset) {
+        if (response.ok && !errorFromSso && !tokenFromReset && !tokenFromApplication) {
           const { user: restored } = (await response.json()) as { user: AuthUser };
           setUser(restored);
           setScreen("portal");
         } else if (hash === "#login" || errorFromSso || tokenFromReset) {
           setScreen("login");
+        } else if (hash === "#candidatura" || tokenFromApplication) {
+          setScreen("candidatura");
         }
       } catch {
         if (hash === "#login" || errorFromSso || tokenFromReset) setScreen("login");
+        else if (hash === "#candidatura" || tokenFromApplication) setScreen("candidatura");
       } finally {
         setSessionChecked(true);
       }
@@ -1634,8 +2005,11 @@ export default function HomePage() {
   if (screen === "admin-login") {
     return <><Toaster richColors position="top-right" /><AdminLogin onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} /></>;
   }
+  if (screen === "candidatura") {
+    return <><Toaster richColors position="top-right" /><CandidaturaScreen onBack={() => navigate("public")} initialApplicationId={applicationId} initialToken={applicationToken} onLinkConsumed={() => { setApplicationToken(undefined); setApplicationId(undefined); }} /></>;
+  }
   if (screen === "portal" && user) {
     return <Portal user={user} onLogout={logout} />;
   }
-  return <PublicSite onLogin={() => navigate("login")} onSecretAdminLogin={() => navigate("admin-login")} publicStats={publicStats} />;
+  return <PublicSite onLogin={() => navigate("login")} onSecretAdminLogin={() => navigate("admin-login")} onCandidatar={() => navigate("candidatura")} publicStats={publicStats} />;
 }

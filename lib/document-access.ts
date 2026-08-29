@@ -3,7 +3,15 @@ import type { getDb } from "@/db";
 import { exceptions, invoices, purchaseOrders, receipts, requests } from "@/db/schema";
 import type { RequestSession } from "./authz";
 
-export const DOCUMENT_ENTITY_TYPES = ["request", "supplier", "invoice", "receipt", "exception", "purchase_order"] as const;
+export const DOCUMENT_ENTITY_TYPES = [
+  "request",
+  "supplier",
+  "invoice",
+  "receipt",
+  "exception",
+  "purchase_order",
+  "application",
+] as const;
 export type DocumentEntityType = (typeof DOCUMENT_ENTITY_TYPES)[number];
 
 export function isDocumentEntityType(value: string): value is DocumentEntityType {
@@ -66,6 +74,11 @@ export async function canAccessDocumentEntity(
       if (session.accessLevel === "company_admin") return row.companyId === session.companyId;
       return session.accessLevel === "analyst";
     }
+    // "application" (candidatura) tem propositadamente sem caso aqui: quem
+    // se candidata ainda não tem sessão nenhuma (nem conta), por isso o seu
+    // acesso é feito por token dedicado em /api/applications/[id]/documents,
+    // não por esta função — chegar aqui sem ser coe_manager/system_admin
+    // (apanhado acima) significa sempre "sem acesso".
     default:
       return false;
   }

@@ -18,6 +18,23 @@ const PUBLIC_API_PATHS = new Set([
   "/api/public-stats",
 ]);
 
+// Prefixos de acesso misto: quem ainda não tem conta nenhuma (candidato a
+// empresa/fornecedor) precisa de conseguir submeter e consultar a sua
+// própria candidatura por um token dedicado, sem sessão — mas a mesma
+// família de rotas também serve a Muntu (coe_manager/system_admin) para
+// avaliar/homologar candidaturas, e essas chamadas continuam a precisar da
+// sessão real. Por isso não entra em PUBLIC_API_PATHS (que ignora sessão
+// por completo) nem em ROUTE_ACCESS (que exige sessão válida): aqui só se
+// verifica o cookie SE ele existir, preenchendo os headers x-muntu-* nesse
+// caso, e nunca se devolve 401 por falta de sessão — cada rota decide, com
+// getOptionalSession (lib/authz.ts), se está a servir um candidato (sem
+// sessão, com token) ou a Muntu (com sessão).
+const OPTIONAL_AUTH_PREFIXES = ["/api/applications"];
+
+function isOptionalAuthPath(pathname: string): boolean {
+  return OPTIONAL_AUTH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 // Bloqueio grosso por prefixo de rota — cobre o essencial da autorização
 // por persona. As rotas com âmbito por linha (ex.: /api/requests, que
 // filtra por dono/empresa) fazem verificação adicional no próprio handler
@@ -50,6 +67,7 @@ export async function middleware(request: NextRequest) {
   const session = await verifySessionToken(token);
 
   if (!session) {
+    if (isOptionalAuthPath(pathname)) return NextResponse.next();
     return NextResponse.json({ error: "Sessão inválida ou expirada. Inicie sessão novamente." }, { status: 401 });
   }
 

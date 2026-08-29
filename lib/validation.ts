@@ -128,3 +128,23 @@ export const supportTicketUpdateSchema = z.object({
 export const supportMessageCreateSchema = z.object({
   body: z.string().trim().min(1, "A mensagem é obrigatória").max(4000),
 });
+
+export const applicationCreateSchema = z.object({
+  kind: z.enum(["empresa", "fornecedor"]),
+  companyName: z.string().trim().min(1, "O nome da empresa é obrigatório").max(200),
+  taxId: z.string().trim().min(1, "O NIF é obrigatório").max(40),
+  sector: z.string().trim().max(120).optional(),
+  contactName: z.string().trim().min(1, "O nome do contacto é obrigatório").max(200),
+  contactEmail: z.string().trim().min(1, "O e-mail é obrigatório").email("E-mail inválido"),
+  contactPhone: z.string().trim().max(40).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+export const applicationReviewSchema = z.union([
+  z.object({ status: z.literal("em_avaliacao") }),
+  z.object({ status: z.literal("aprovada") }),
+  z.object({
+    status: z.literal("rejeitada"),
+    rejectionReason: z.string().trim().min(1, "Indique o motivo da rejeição").max(1000),
+  }),
+]);

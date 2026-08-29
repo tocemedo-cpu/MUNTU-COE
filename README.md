@@ -58,7 +58,7 @@ Lado do cliente:
 Lado Muntu:
 
 - **Analista — Buyer/AP** (`analyst`) — reporta ao COE Manager, restrito à **execução** do workflow (fornecedores, ordens de compra, recepções, facturas, excepções, pagamentos, repositório). Sem dashboard, sem relatórios, sem administração.
-- **COE Manager** (`coe_manager`) — visão abrangente: dashboard, relatórios, aprovações e toda a execução P2P entre empresas clientes.
+- **COE Manager** (`coe_manager`) — visão abrangente: dashboard, relatórios, aprovações, toda a execução P2P entre empresas clientes, e a avaliação/homologação de candidaturas (ver "Candidaturas e homologação").
 - **System Admin** (`system_admin`) — responsável máximo da plataforma. Único nível com acesso a `/api/admin/**` e à página **Utilizadores**, onde concede/retira o nível de acesso de qualquer utilizador. Vê tudo o que o COE Manager vê.
 - **Fornecedor** (`supplier`) — vê e edita só o seu próprio perfil (Supplier Passport) e só as suas próprias POs, recepções e facturas. Cada utilizador `supplier` está ligado a um `suppliers.id` concreto (`users.supplier_id`); sem essa ligação, o âmbito fica vazio — nunca "vê tudo" por omissão. O System Admin faz a ligação em **Utilizadores**. Passport, risco e estado continuam avaliados pela Muntu (não editáveis pelo próprio fornecedor); categoria e conteúdo local são auto-declaráveis via `PATCH /api/suppliers/:id`. `PATCH /api/receipts/:id` (confirmar recepção) também está limitado à recepção do próprio fornecedor.
 
@@ -160,6 +160,21 @@ Isto obrigou a abrir `/api/documents` a qualquer sessão válida no `middleware.
 
 A linha temporal da PO é derivada, não fabricada: junta o `createdAt`/`decidedAt` reais do pedido de origem (quando existe `requestId`) com o estado actual da PO — sem tabela de eventos nova, que precisaria de um caminho de escrita para cada transição de estado que este app ainda não tem.
 
+## Candidaturas e homologação (o primeiro contacto real com a plataforma)
+
+Antes disto, não havia nenhuma forma de uma empresa ou fornecedor novo chegar à plataforma: não existia auto-registo, nem rota para criar empresa/utilizador (só `GET`/`PATCH` em `/api/admin/*`), e "Convidar fornecedor" (`Suppliers`) só criava uma linha em `suppliers`, sem utilizador nem login nenhum. Quem quisesse aceder tinha de ser criado à mão por SQL directo.
+
+`applications` (tabela nova) modela o fluxo Candidatura → Documentos → Avaliação → Aprovada/Rejeitada → Homologação → Acesso Muntu:
+
+1. **Candidatura** — formulário público em `#candidatura` (`CandidaturaScreen`, sem sessão nenhuma), `POST /api/applications`. Devolve um token assinado (HMAC, 30 dias, `purpose: "application_access"` — mesmo mecanismo dos tokens de recuperação de acesso) e envia um e-mail de confirmação com o link de acompanhamento (`sendApplicationReceivedEmail`, mesmo comportamento de "regista no log em vez de falhar" sem `BREVO_API_KEY`/`BREVO_FROM_EMAIL`).
+2. **Documentos** — o candidato, ainda sem conta nenhuma, anexa documentos de suporte a partir do link recebido (`POST /api/applications/:id/documents`, autorizado só pelo token, nunca por sessão). A equipa Muntu vê os mesmos documentos pela rota geral (`GET /api/documents?entityType=application&entityId=...`), coberta pelo desvio de `coe_manager`/`system_admin` já existente em `lib/document-access.ts`.
+3. **Avaliação / Aprovada / Rejeitada** — só `coe_manager`/`system_admin`, no ecrã **Candidaturas** do portal (`PATCH /api/applications/:id`). Rejeitar exige motivo.
+4. **Homologação → Acesso Muntu** — `POST /api/applications/:id/homologate`, só a partir do estado `aprovada`. Cria de facto a `companies`/`suppliers` e o primeiro utilizador (`company_admin` ou `supplier`, sem palavra-passe ainda) e envia um e-mail de boas-vindas reaproveitando o mesmo token/rota de "definir palavra-passe" da recuperação de acesso (`sendWelcomeSetPasswordEmail` + `POST /api/auth/password-reset/confirm`). Recusa homologar duas vezes ou um e-mail já usado por outra conta.
+
+`middleware.ts` ganhou `OPTIONAL_AUTH_PREFIXES` para este caso: `/api/applications*` nunca devolve `401` por falta de sessão (o candidato não tem nenhuma), mas continua a preencher os headers `x-muntu-*` quando existe uma sessão real, para a Muntu poder rever/homologar — `lib/authz.ts#getOptionalSession` é quem distingue os dois casos dentro de cada rota.
+
+**Limitação conhecida (fica para depois):** só cobre a Homologação — o primeiro dos três pilares operacionais da Muntu COE (Homologação de Empresas, Procurement, Supplier Development). Procurement e Supplier Development continuam sem mudanças nesta ronda.
+
 ## Rotas de API
 
 | Rota | Métodos | Descrição |
@@ -201,8 +216,12 @@ A linha temporal da PO é derivada, não fabricada: junta o `createdAt`/`decided
 | `/api/support/:id/messages` | `POST` | Responde num pedido (dono ou `system_admin`) — uma resposta do admin move automaticamente `aberto` → `em_curso` |
 | `/api/approvers` | `GET` | Aprovadores reais para o wizard de novo pedido — `company_admin` da própria empresa + todo o `coe_manager`/`system_admin` |
 | `/api/public-stats` | `GET` | Estatísticas agregadas e não sensíveis (sem sessão) para o site público e o login — activos, SLA%, ciclo médio |
+| `/api/applications` | `GET`, `POST` | `POST` submete uma candidatura (sem sessão); `GET` lista todas (só `coe_manager`/`system_admin`) |
+| `/api/applications/:id` | `GET`, `PATCH` | `GET`: detalhe + documentos — por sessão (`coe_manager`/`system_admin`) ou por `?token=` do próprio candidato; `PATCH`: avança o estado (`em_avaliacao`/`aprovada`/`rejeitada`, só interno) |
+| `/api/applications/:id/documents` | `POST` | Upload pelo próprio candidato — `multipart/form-data`, campos `file` e `token` |
+| `/api/applications/:id/homologate` | `POST` | Cria a empresa/fornecedor + primeiro utilizador a partir de uma candidatura `aprovada` (só `coe_manager`/`system_admin`) |
 
-Todas as rotas excepto `/api/auth/login`, `/api/auth/logout` e `/api/public-stats` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
+Todas as rotas excepto `/api/auth/login`, `/api/auth/logout`, `/api/public-stats` e `/api/applications*` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão. `/api/applications*` é a excepção mista: nunca bloqueia por falta de sessão (o candidato não tem nenhuma), mas continua a autenticar quando existe uma — ver secção "Candidaturas e homologação" acima.
 
 ## Deploy no Render
 
@@ -245,7 +264,7 @@ npm run db:seed
 Dois níveis, separados por design:
 
 - **`npm test`** — testes unitários (`tests/unit/`), sem qualquer base de dados: hashing/verificação de password, classificação de tiers de PO/factura, tokens de sessão (assinatura, adulteração, expiração) e os schemas zod. Correm em menos de um segundo, seguros de correr sempre, inclusive sem Postgres instalado.
-- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, a UI de admin de tarifas/retainer/SSO (`/api/admin/billing-rates`, `/api/admin/companies/:id` — incluindo que o client secret nunca é devolvido e sobrevive a um PATCH que não o envie), o upload/download real de documentos (round trip completo dos bytes via `bytea`), e a recuperação de acesso (pedido sem enumeração de utilizadores, confirmação com token válido/expirado/mal-tipado, e que a nova password passa a funcionar no login). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
+- **`npm run test:integration`** — testes de integração (`tests/integration/`) contra um Postgres **local** real: login (`POST /api/auth/login`), aprovação de pedido a gerar a PO ligada com o tier certo, geração de factura de cliente (retainer + tiers), o escopo por empresa de `receipts`/`exceptions`/`payments`, a UI de admin de tarifas/retainer/SSO (`/api/admin/billing-rates`, `/api/admin/companies/:id` — incluindo que o client secret nunca é devolvido e sobrevive a um PATCH que não o envie), o upload/download real de documentos (round trip completo dos bytes via `bytea`), a recuperação de acesso (pedido sem enumeração de utilizadores, confirmação com token válido/expirado/mal-tipado, e que a nova password passa a funcionar no login), e o fluxo de candidatura/homologação completo (submissão sem sessão, acesso por token vs. por sessão de revisor, transições de estado, upload pelo candidato, e a homologação a criar mesmo a empresa/fornecedor + primeiro utilizador, com os casos de já-homologada e e-mail já existente). Chamam os handlers de rota directamente (sem servidor Next.js a decorrer) com sessões simuladas via os mesmos headers `x-muntu-*` que o `middleware.ts` injecta — por desenho, não passam pelo middleware em si.
 
 Para correr os testes de integração é preciso um Postgres local (nunca aponte isto para o Supabase de produção):
 
