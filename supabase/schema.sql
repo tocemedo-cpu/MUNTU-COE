@@ -349,153 +349,18 @@ create policy "public write documents" on public.documents for insert with check
 -- role key.
 
 -- -----------------------------------------------------------------
--- Dados de demonstração
+-- Configuração real (não é dado de demonstração)
 -- -----------------------------------------------------------------
 
-insert into public.companies (name, domain, auth_method) values
-  ('Operadora Atlântico, SA', 'operadora.ao', 'password')
-on conflict (domain) do nothing;
-
-insert into public.users (name, email, password, role, initials, tenant) values
-  ('Ana Manuel', 'ana.manuel@operadora.ao', 'Muntu2026!', 'Requisitante', 'AM', 'Operadora Atlântico, SA'),
-  ('João Sebastião', 'joao.sebastiao@operadora.ao', 'Muntu2026!', 'Administrador da empresa', 'JS', 'Operadora Atlântico, SA'),
-  ('Marta Miguel', 'marta.miguel@muntucoe.ao', 'Muntu2026!', 'COE Manager', 'MM', 'Operadora Atlântico, SA'),
-  ('Sofia Neto', 'sofia.neto@muntucoe.ao', 'Muntu2026!', 'Analista (Buyer/AP)', 'SN', 'Operadora Atlântico, SA'),
-  ('Rui Domingos', 'rui.domingos@muntucoe.ao', 'Muntu2026!', 'System Admin', 'RD', 'Operadora Atlântico, SA'),
-  ('Carlos Mateus', 'carlos.mateus@kwanzaindustrial.ao', 'Muntu2026!', 'Fornecedor', 'CM', 'Operadora Atlântico, SA')
-on conflict (email) do nothing;
-
--- Backfill: liga os utilizadores de demonstração à empresa e ao nível de
--- acesso correcto. Seguro de repetir (define sempre os mesmos valores).
--- Inclui a renomeação do antigo nível 'muntu_ops' para 'coe_manager',
--- para quem já tinha corrido uma versão anterior deste script.
-update public.users
-set role = 'Requisitante', access_level = 'requester', company_id = c.id
-from public.companies c
-where c.domain = 'operadora.ao' and public.users.email = 'ana.manuel@operadora.ao';
-
-update public.users
-set role = 'Administrador da empresa', access_level = 'company_admin', company_id = c.id
-from public.companies c
-where c.domain = 'operadora.ao' and public.users.email = 'joao.sebastiao@operadora.ao';
-
-update public.users set role = 'COE Manager', access_level = 'coe_manager' where email = 'marta.miguel@muntucoe.ao';
-update public.users set access_level = 'coe_manager' where access_level = 'muntu_ops';
-update public.users set access_level = 'analyst' where email = 'sofia.neto@muntucoe.ao';
-update public.users set access_level = 'system_admin' where email = 'rui.domingos@muntucoe.ao';
-update public.users set access_level = 'supplier' where email = 'carlos.mateus@kwanzaindustrial.ao';
-
--- Migração de segurança: as senhas de demonstração acima ficam em texto
--- simples nesta instrução INSERT só para serem legíveis aqui. Esta
--- actualização troca-as (e quaisquer outras ainda em texto simples,
--- p.ex. de uma instalação anterior a esta alteração) por um hash bcrypt,
--- compatível com bcryptjs (ver lib/password.ts). Idempotente: linhas já
--- em formato bcrypt ($2a$/$2b$/$2y$) são ignoradas.
-create extension if not exists pgcrypto;
-
-update public.users
-set password = crypt(password, gen_salt('bf', 10))
-where password is not null and password !~ '^\$2[aby]\$';
-
--- sla_due_at calculado a partir da prioridade (Alta=4h, Média=8h,
--- Normal=16h — mesmas regras de lib/requests-sla.ts); decided_at só
--- preenchido para os que já saíram de "Aprovação". REQ-2026-0809 fica
--- deliberadamente com o prazo já vencido (mesmo espírito do "Vencido 2h"
--- que já tinha no texto de sla), para o relatório mostrar um incumprimento
--- real em vez de só casos dentro do prazo.
-insert into public.requests (id, subject, tower, type, value, status, priority, owner, sla, stage, submitted, supplier, cost_center, sla_due_at, decided_at) values
-  ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 'PO standard', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210', now() + interval '4 hours', null),
-  ('REQ-2026-0813', 'Inspecção NDT offshore', 'Serviços técnicos', 'Compra urgente', 31600000, 'Em execução', 'Alta', 'Marta Miguel', '18h 40m', 3, '25 Ago, 15:42', 'Atlântico Integrity', 'INT-B15-105', now() + interval '4 hours', now()),
-  ('REQ-2026-0812', 'Calibração de PRV — campanha Q3', 'PO-to-Receipt', 'PO standard', 12450000, 'Receção', 'Média', 'Domingos José', '1d 04h', 4, '24 Ago, 11:20', 'Luanda Calibration Services', 'MAI-PRV-330', now() + interval '8 hours', now()),
-  ('REQ-2026-0809', 'Consumíveis de manutenção', 'Invoice-to-Pay', 'PO catalogado', 5980000, 'Excepção', 'Média', 'Ana Manuel', 'Vencido 2h', 6, '22 Ago, 08:05', 'Mwangolé Supplies', 'MRO-BASE-090', now() - interval '1 hour', now()),
-  ('REQ-2026-0804', 'Transporte de equipa para Soyo', 'Invoice-to-Pay', 'PO standard', 3200000, 'Pago', 'Normal', 'Ana Manuel', 'Concluído', 7, '19 Ago, 13:37', 'Norte Logística', 'LOG-SOY-011', now() + interval '16 hours', now())
-on conflict (id) do nothing;
-
--- Backfill: liga os pedidos de demonstração à empresa e, quando o dono
--- corresponde a um utilizador real, ao respectivo owner_user_id.
-update public.requests r
-set company_id = c.id
-from public.companies c
-where c.domain = 'operadora.ao';
-
-update public.requests r
-set owner_user_id = u.id
-from public.users u
-where u.email = 'ana.manuel@operadora.ao' and r.owner = 'Ana Manuel';
-
-insert into public.suppliers (name, category, passport, risk, local, status) values
-  ('Kwanza Industrial', 'Válvulas e MRO', 96, 'Baixo', '92%', 'Activo'),
-  ('Atlântico Integrity', 'NDT e Integridade', 88, 'Baixo', '78%', 'Activo'),
-  ('Luanda Calibration Services', 'Calibração', 81, 'Médio', '100%', 'Revisão'),
-  ('Mwangolé Supplies', 'Consumíveis', 73, 'Médio', '85%', 'Documentos'),
-  ('Norte Logística', 'Transporte', 91, 'Baixo', '100%', 'Activo')
-on conflict (name) do nothing;
-
-insert into public.purchase_orders (id, supplier, description, value, status, next_action, tier) values
-  ('PO-6100432', 'Kwanza Industrial', 'Válvulas de controlo', 84000000, 'Expediting', '02 Set', 'standard'),
-  ('PO-6100424', 'Atlântico Integrity', 'Inspecção NDT offshore', 31600000, 'Confirmado', '30 Ago', 'complexo'),
-  ('PO-6100411', 'Mwangolé Supplies', 'Consumíveis MRO', 5980000, 'Excepção', 'Hoje', 'automatico'),
-  ('PO-6100380', 'Luanda Calibration Services', 'Calibração PRV', 12450000, 'Entregue', 'Receber', 'standard')
-on conflict (id) do nothing;
-
-insert into public.receipts (po, description, supplier, value, progress, status) values
-  ('PO-6100380', 'Calibração PRV — campanha Q3', 'Luanda Calibration Services', 12450000, 100, 'A confirmar'),
-  ('PO-6100432', 'Válvulas de controlo — lote 1/2', 'Kwanza Industrial', 42000000, 50, '02 Set'),
-  ('PO-6100424', 'Inspecção NDT — mobilização', 'Atlântico Integrity', 9480000, 30, 'Em curso');
-
-insert into public.invoices (id, supplier, po, value, match, status, due) values
-  ('FT-2026-1198', 'Kwanza Industrial', 'PO-6100432', 42000000, '3-way match', 'Validada', '04 Set'),
-  ('FT-2026-1192', 'Mwangolé Supplies', 'PO-6100411', 5980000, 'Preço divergente', 'Excepção', 'Hoje'),
-  ('FT-2026-1186', 'Norte Logística', 'PO-6100398', 3200000, '3-way match', 'Pago', 'Concluído'),
-  ('FT-2026-1179', 'Luanda Calibration Services', 'PO-6100380', 12450000, 'Receção em falta', 'Pendente', '29 Ago')
-on conflict (id) do nothing;
-
--- Backfill: liga POs e facturas de demonstração à empresa, e classifica
--- o tier de facturação (mesma regra de lib/billing.ts).
-update public.purchase_orders po
-set company_id = c.id
-from public.companies c
-where c.domain = 'operadora.ao';
-
-update public.invoices i
-set company_id = c.id,
-    tier = case
-      when i.status = 'Excepção' then 'excecao'
-      when i.match = '3-way match' then 'limpa'
-      else 'assistida'
-    end
-from public.companies c
-where c.domain = 'operadora.ao';
-
--- Backfill: liga POs, recepções e facturas ao fornecedor (por nome), e
--- o utilizador de demonstração Carlos Mateus à Kwanza Industrial.
-update public.purchase_orders po set supplier_id = s.id from public.suppliers s where s.name = po.supplier;
-update public.receipts r set supplier_id = s.id from public.suppliers s where s.name = r.supplier;
-update public.invoices i set supplier_id = s.id from public.suppliers s where s.name = i.supplier;
-
--- Backfill: liga recepções e excepções de demonstração à empresa
--- (fecha a lacuna em que company_admin via dados de todas as empresas
--- por estas duas tabelas não terem company_id até agora).
-update public.receipts r
-set company_id = c.id
-from public.companies c
-where c.domain = 'operadora.ao' and r.company_id is null;
-
-update public.exceptions e
-set company_id = c.id
-from public.companies c
-where c.domain = 'operadora.ao' and e.company_id is null;
-
-update public.payment_batches pb
-set company_id = c.id
-from public.companies c
-where c.domain = 'operadora.ao' and pb.company_id is null;
-
-update public.users
-set supplier_id = s.id
-from public.suppliers s
-where s.name = 'Kwanza Industrial' and public.users.email = 'carlos.mateus@kwanzaindustrial.ao';
-
+-- Tarifas de facturação — valores reais do Estudo de Viabilidade
+-- §32.4/53.1 (ponto médio de cada intervalo indicativo, em AOA), exigidos
+-- para o motor de facturação (lib/billing.ts) conseguir calcular preço
+-- nenhum, mesmo sem clientes reais ainda. Ao contrário do que existia
+-- antes aqui (empresa/utilizadores/pedidos/fornecedores/POs/facturas/
+-- excepções/pagamentos/documentos fictícios — "Operadora Atlântico, SA",
+-- "Ana Manuel", "Kwanza Industrial", etc.), isto não é actividade de
+-- negócio inventada: é configuração de preços que o sistema precisa para
+-- funcionar, editável depois em Facturação → Tarifas (system_admin).
 insert into public.billing_rates (key, label, amount) values
   ('po_automatico', 'PO automático/catalogado', 7000),
   ('po_standard', 'PO standard assistido', 10500),
@@ -505,22 +370,14 @@ insert into public.billing_rates (key, label, amount) values
   ('invoice_excecao', 'Factura com excepção/disputa', 11500)
 on conflict (key) do nothing;
 
-insert into public.exceptions (id, title, ref, owner, cause, impact, created_at, resolved) values
-  ('EXC-0264', 'Preço da factura diverge do PO em 4,8%', 'FT-2026-1192 • PO-6100411', 'Comprador', 'Preço divergente', 'AOA 286 000', now() - interval '2 hours 14 minutes', false),
-  ('EXC-0261', 'Recepção de serviço não registada', 'FT-2026-1179 • PO-6100380', 'Requisitante', 'Recepção em falta', 'AOA 12 450 000', now() - interval '7 hours 38 minutes', false),
-  ('EXC-0258', 'Certificado fiscal expirado', 'Supplier Passport • Mwangolé Supplies', 'Fornecedor', 'Dados fiscais', 'Bloqueio de pagamento', now() - interval '27 hours', false),
-  ('EXC-0270', 'Quantidade recebida inferior à da PO — lote 2', 'PO-6100432', 'Comprador', 'Quantidade', 'AOA 4 200 000', now() - interval '5 hours', false),
-  ('EXC-0245', 'Justificativo em falta para despesa adicional', 'REQ-2026-0809', 'Requisitante', 'Outros', 'AOA 850 000', now() - interval '4 days', true)
-on conflict (id) do nothing;
-
-insert into public.payment_batches (id, date, count, value, status, released) values
-  ('PAY-2026-035', '28 Ago 2026', 8, 68450000, 'Pronto', false),
-  ('PAY-2026-034', '25 Ago 2026', 11, 102980000, 'Pago', true),
-  ('PAY-2026-033', '21 Ago 2026', 6, 44200000, 'Pago', true)
-on conflict (id) do nothing;
-
-insert into public.documents (name, type, request, owner, version, updated) values
-  ('Contrato_MRO_2026.pdf', 'Contrato', 'REQ-2026-0814', 'Carlos Mateus', 'v3', 'Há 18 min'),
-  ('Certificados_PRV_Q3.zip', 'Certificação', 'REQ-2026-0812', 'Marta Miguel', 'v1', 'Hoje, 10:21'),
-  ('Acta_Rececao_PO6100380.pdf', 'Receção', 'REQ-2026-0812', 'Domingos José', 'v2', 'Ontem'),
-  ('Parecer_Fiscal_AOA.pdf', 'Compliance', 'POL-2026-04', 'Muntu Legal', 'v5', '22 Ago');
+-- Sem dados de demonstração aqui de propósito: uma empresa, os seus
+-- utilizadores, pedidos, fornecedores, POs, recepções, facturas,
+-- excepções, pagamentos e documentos fictícios só devem existir numa
+-- base de dados local/de testes (ver `npm run db:seed` e
+-- db/seed-data.ts), nunca na base de dados real do Supabase — este
+-- ficheiro é colado directamente lá. A primeira conta real
+-- (coe_manager/system_admin) cria-se com
+-- `npx tsx scripts/create-owner-admins.ts` (ver README); as restantes
+-- entram por SSO/convite normal, e todo o resto (empresas clientes,
+-- fornecedores, pedidos, POs, ...) preenche-se com uso real da
+-- plataforma, nunca com dados fictícios pré-inseridos.
