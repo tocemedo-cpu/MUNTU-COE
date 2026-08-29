@@ -116,8 +116,15 @@ export async function seedIfEmpty(db: Db) {
   }
   const supplierIdByName = new Map(supplierRows.map((s) => [s.name, s.id]));
 
-  const existingUsers = await db.select().from(schema.users).limit(1);
-  if (existingUsers.length === 0) {
+  // Verifica um utilizador de demonstração concreto, não só "a tabela tem
+  // alguma linha" — mesma classe de bug já corrigida abaixo para
+  // `requests`: outro código (testes de integração, candidaturas
+  // homologadas) também insere em `users` com as suas próprias linhas, o
+  // que faria este portão dar um falso positivo e saltar a semeadura dos
+  // utilizadores de demonstração (incluindo a conta que outros testes,
+  // como o de login, esperam encontrar).
+  const existingDemoUser = await db.select().from(schema.users).where(eq(schema.users.email, demoUsers[0].email));
+  if (existingDemoUser.length === 0) {
     const usersToInsert = await Promise.all(
       demoUsers.map(async (user) => ({
         ...user,
