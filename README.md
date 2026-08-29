@@ -66,7 +66,17 @@ Lado Muntu:
 
 A página **Utilizadores** (`/api/admin/users`) lista todos os utilizadores da plataforma e permite mudar o nível de acesso de qualquer um por um simples select — chama `PATCH /api/admin/users/:id`. Estas duas rotas só respondem a `system_admin`; qualquer outro nível recebe `403` do `middleware.ts` antes de chegar à rota.
 
-**Ainda por fazer, fora do âmbito desta alteração:** uma caixa de entrada onde o System Admin responde a pedidos/dúvidas dos utilizadores (hoje não existe nenhum mecanismo de solicitação de suporte).
+### Contas dos donos da operação (COE Manager / System Admin) e acesso reservado
+
+As contas reais de quem gere a operação (não dados de demonstração) são criadas por um script dedicado, não pelo seed:
+
+```bash
+DATABASE_URL="<connection string real>" npx tsx scripts/create-owner-admins.ts
+```
+
+Cria `tocemedo@gmail.com` (`coe_manager`) e `zelyvaldog@gmail.com` (`system_admin`) — ou, se já existirem, só actualiza o papel/dados, **nunca** a password (correr o script outra vez nunca desfaz uma troca de password já feita). Numa criação nova, imprime uma password inicial aleatória uma única vez no terminal — guarde-a; a partir daí muda-se como qualquer conta, por "Recuperar acesso" no ecrã de login.
+
+Estas duas contas entram por um ecrã diferente do login normal dos clientes/fornecedores — **acesso reservado**, com estética escura e um único passo (e-mail + password, sem o lookup de empresa/SSO). Não há nenhum botão visível para lá chegar: no site público, clicar 4 vezes seguidas (menos de 800ms entre cliques) no símbolo Muntu do cabeçalho abre-o. A URL nunca fica marcada com esse ecrã (sem hash tipo `#admin-login`) precisamente para não ficar óbvio nem no histórico do browser — quem não conhece o gesto não encontra o ecrã por engano.
 
 ## Facturação de actividade (cobrança ao cliente)
 

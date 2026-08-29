@@ -202,6 +202,20 @@ a { color: inherit; text-decoration: none; }
 .secure-note { display: flex; justify-content: center; gap: 8px; align-items: center; margin-top: 30px; color: #7a838b; font-size: 11px; }
 .secure-note svg { width: 16px; color: var(--green); }
 
+/* Acesso reservado (COE/System Admin) — ecrã escuro e minimal, sem o
+   painel de marketing do login normal, deliberadamente distinto para
+   sinalizar que se está fora do fluxo público. */
+.admin-login-page { min-height: 100vh; display: grid; place-items: center; padding: 32px; background: radial-gradient(circle at 50% -10%, #2a3237 0%, #14181a 60%, #0c0f10 100%); }
+.admin-login-card { width: min(100%, 380px); text-align: center; }
+.admin-login-card .brand { justify-content: center; margin-bottom: 26px; }
+.admin-login-card .kicker { color: #e6bd75; }
+.admin-login-card h2 { margin: 6px 0 28px; color: #fff; font-size: 24px; letter-spacing: -.02em; }
+.admin-login-card form { display: grid; gap: 16px; text-align: left; }
+.admin-login-card form > label { display: grid; gap: 8px; color: rgba(255,255,255,.72); font-size: 12px; font-weight: 700; }
+.admin-login-card .input-with-icon input { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.16); color: #fff; }
+.admin-login-card .input-with-icon > svg { color: rgba(255,255,255,.5); }
+.admin-login-card .back-link { position: static; justify-content: center; margin-top: 22px; color: rgba(255,255,255,.5); }
+
 /* Portal shell */
 .portal-shell { min-height: 100vh; background: #f3f1ec; }
 .sidebar { position: fixed; z-index: 40; inset: 0 auto 0 0; width: 272px; display: flex; flex-direction: column; color: #e8e7e3; background: #22282b; border-right: 1px solid #343b3f; overflow-y: auto; }
