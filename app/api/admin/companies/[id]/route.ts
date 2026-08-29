@@ -18,6 +18,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (parsed.data.ssoIssuerUrl !== undefined) updates.ssoIssuerUrl = parsed.data.ssoIssuerUrl || null;
   if (parsed.data.ssoClientId !== undefined) updates.ssoClientId = parsed.data.ssoClientId || null;
   if (parsed.data.ssoClientSecret) updates.ssoClientSecret = parsed.data.ssoClientSecret;
+  if (parsed.data.iban !== undefined) updates.iban = parsed.data.iban || null;
+  if (parsed.data.bic !== undefined) updates.bic = parsed.data.bic || null;
 
   if (Object.keys(updates).length === 0) {
     return Response.json({ error: "Nada para actualizar" }, { status: 400 });

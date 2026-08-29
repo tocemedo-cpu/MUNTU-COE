@@ -226,6 +226,20 @@ Duas automações ligadas pelo mesmo sinal real: `suppliers.risk`.
 
 **Libertação automática de pagamento** — `POST /api/admin/payment-release/run`, mesmo padrão de agendador externo com `CRON_SECRET` das duas automações acima. Um lote de pagamento (`payment_batches`) ainda por libertar só é libertado sozinho (`released: true`, `auto_released_at`) quando a empresa dele não tem nenhum sinal real de problema por resolver: zero excepções abertas (`exceptions.resolved = false`) e nenhuma PO gerada para um fornecedor de risco alto sem override registado. Havendo qualquer um dos dois, o lote fica como estava — só a libertação manual (`PATCH /api/payments/:id`) continua disponível, porque decidir libertar apesar do problema é sempre uma decisão humana.
 
+## Exportação bancária ISO 20022 (pain.001)
+
+`GET /api/payments/:id/export/iso20022` gera um ficheiro `pain.001.001.03` (Customer Credit Transfer Initiation) real para um lote de pagamento — o formato que a maioria dos bancos angolanos/internacionais aceita para importar ordens de transferência em lote.
+
+`payment_batches` nunca teve linhas próprias — é sempre um agregado (`count`/`value`), sem ligação nenhuma a facturas concretas. Em vez de inventar uma tabela de ligação nova só para isto, a exportação usa a interpretação real que este modelo já suporta: **as transacções do ficheiro são as facturas `status = "Validada"` (3-way match concluído) da mesma empresa do lote** — o mesmo sinal "pronto a pagar" que a libertação automática de pagamento já usa. Cada factura vira um `<CdtTrfTxInf>`; o `EndToEndId` é o id da própria factura, para o banco devolver uma referência que a Muntu consegue reconciliar de volta.
+
+Pré-requisitos, verificados antes de gerar o ficheiro (nunca um XML incompleto ou com contas em branco):
+
+- **Conta devedora da empresa** — `companies.iban`/`bic`, editável em **Administração → SSO e conta bancária por empresa** (`system_admin`). Sem isto definido, a exportação recusa com `400`.
+- **Conta de cada fornecedor credor** — `suppliers.iban`/`bic`, editável no **Supplier Passport** de cada fornecedor (secção "Conta bancária", `company_admin`/`analyst`/`coe_manager`/`system_admin` — mesmos papéis que já editam `risk`/`passport`). Se alguma factura elegível tiver um fornecedor sem conta configurada, a exportação recusa com `400` e a lista dos ids das facturas em causa, em vez de gerar um ficheiro incompleto ou omitir silenciosamente um pagamento devido.
+- **Pelo menos uma factura validada** — sem isso, `400`.
+
+O ecrã **Pagamentos** ganhou um botão "ISO 20022" por lote, que descarrega o ficheiro directamente (mesmo padrão de descarga por blob já usado para documentos).
+
 ## Catálogo (preços pré-negociados para "PO catalogado")
 
 O wizard de novo pedido já tinha "PO catalogado" como tipo de transacção (tier automático de facturação, `lib/billing-tiers.ts`) desde uma ronda anterior — mas sem nenhum catálogo real por trás, era só um texto à escolha sem preços nenhuns associados. `catalog_items` (tabela nova) fecha essa lacuna:
@@ -252,7 +266,7 @@ Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo
 | `/api/requests` | `GET`, `POST` | Listar/criar pedidos |
 | `/api/requests/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar pedido |
 | `/api/suppliers` | `GET`, `POST` | Listar/convidar fornecedores — um `supplier` só vê o seu próprio |
-| `/api/suppliers/:id` | `PATCH` | Editar fornecedor — interno: tudo; `supplier`: só o seu, só categoria/conteúdo local |
+| `/api/suppliers/:id` | `PATCH` | Editar fornecedor — interno: tudo (incluindo IBAN/BIC, ver exportação ISO 20022 acima); `supplier`: só o seu, só categoria/conteúdo local |
 | `/api/purchase-orders` | `GET` | Ordens de compra |
 | `/api/receipts` | `GET` | Recepções |
 | `/api/receipts/:id` | `PATCH` | Confirmar recepção |
@@ -261,13 +275,14 @@ Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo
 | `/api/exceptions/:id` | `PATCH` | Resolver excepção |
 | `/api/payments` | `GET` | Lotes de pagamento |
 | `/api/payments/:id` | `PATCH` | Libertar pagamento |
+| `/api/payments/:id/export/iso20022` | `GET` | Gera e descarrega o ficheiro pain.001 do lote (facturas validadas da empresa) |
 | `/api/documents` | `GET`, `POST` | Repositório documental — `POST` é upload real (`multipart/form-data`, campo `file`, até 15 MB); com `?entityType=&entityId=` (ou os mesmos campos no `POST`), lista/anexa documentos de uma entidade concreta (pedido, fornecedor, factura, recepção, excepção, PO) — âmbito real por linha, não por nível de acesso (ver `lib/document-access.ts`) |
 | `/api/documents/:id/download` | `GET` | Descarrega os bytes reais do ficheiro carregado |
 | `/api/admin/users` | `GET`, `POST` | `GET`: lista todos os utilizadores; `POST`: cria um utilizador novo (qualquer empresa/fornecedor/nível) — só `system_admin` |
 | `/api/admin/users/:id` | `PATCH` | Muda o nível de acesso/empresa de um utilizador (só `system_admin`) |
 | `/api/company/users` | `GET`, `POST` | Equipa da própria empresa — só `company_admin`, sempre escopado a `session.companyId`; `POST` convida um colega (`requester`/`company_admin`) sem palavra-passe |
 | `/api/admin/companies` | `GET` | Lista as empresas clientes (só `system_admin`) |
-| `/api/admin/companies/:id` | `PATCH` | Actualiza retainer e/ou configuração de SSO de uma empresa — só os campos enviados mudam (só `system_admin`) |
+| `/api/admin/companies/:id` | `PATCH` | Actualiza retainer, SSO e/ou IBAN/BIC (conta devedora, ver exportação ISO 20022 acima) de uma empresa — só os campos enviados mudam (só `system_admin`) |
 | `/api/admin/billing` | `GET`, `POST` | Lista/gera facturas de cobrança a clientes (só `system_admin`) |
 | `/api/admin/billing/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar/enviar à contabilidade (só `system_admin`) |
 | `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |

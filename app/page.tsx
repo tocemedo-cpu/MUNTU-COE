@@ -90,7 +90,7 @@ type RequestItem = {
   decidedAt: string | null;
 };
 
-type Supplier = { id: number; name: string; category: string; passport: number; risk: string; local: string; status: string };
+type Supplier = { id: number; name: string; category: string; passport: number; risk: string; local: string; status: string; iban: string | null; bic: string | null };
 type PurchaseOrder = { id: string; supplier: string; description: string; value: number; status: string; nextAction: string; supplierId: number | null; requestId: string | null };
 type Receipt = { id: number; po: string; description: string; supplier: string; value: number; progress: number; status: string };
 type Invoice = { id: string; supplier: string; po: string; value: number; match: string; status: string; due: string };
@@ -776,6 +776,27 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     }
   };
 
+  const exportIso20022 = async (id: string) => {
+    try {
+      const response = await fetch(`/api/payments/${id}/export/iso20022`);
+      if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Não foi possível gerar o ficheiro");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = `pain001-${id}.xml`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Ficheiro ISO 20022 gerado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível gerar o ficheiro");
+    }
+  };
+
   const confirmReceipt = async (id: number) => {
     try {
       const { receipt: updated } = await api<{ receipt: Receipt }>(`/api/receipts/${id}`, { method: "PATCH", body: JSON.stringify({ action: "confirm" }) });
@@ -799,7 +820,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     }
   };
 
-  const updateSupplierProfile = async (id: number, fields: { category?: string; local?: string }) => {
+  const updateSupplierProfile = async (id: number, fields: { category?: string; local?: string; iban?: string; bic?: string }) => {
     try {
       const { supplier: updated } = await api<{ supplier: Supplier }>(`/api/suppliers/${id}`, {
         method: "PATCH",
@@ -894,7 +915,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "new-request" && <NewRequest step={wizardStep} setStep={setWizardStep} form={form} setForm={setForm} submit={submitRequest} suppliers={suppliersList} approvers={approvers} onUploadDocument={uploadDocument} />}
           {view === "requests" && <RequestsTable title="Meus pedidos" subtitle="Acompanhe prioridade, responsável, etapa e SLA em tempo real." requests={filteredRequests} onSelect={setSelectedRequest} />}
           {view === "approvals" && <Approvals requests={requests.filter((item) => item.status === "Aprovação")} onAction={actOnRequest} onSelect={setSelectedRequest} />}
-          {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />)}
+          {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} onUpdateBankDetails={updateSupplierProfile} />)}
           {view === "tenders" && <Tenders user={user} suppliersList={suppliersList} />}
           {view === "contracts" && <Contracts user={user} suppliersList={suppliersList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "catalog" && <Catalog user={user} suppliersList={suppliersList} />}
@@ -902,7 +923,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
-          {view === "payments" && <Payments batches={paymentBatches} onRelease={releasePayment} />}
+          {view === "payments" && <Payments batches={paymentBatches} onRelease={releasePayment} onExportIso20022={exportIso20022} />}
           {view === "reports" && <Reports requests={requests} exceptions={exceptionsList} invoices={invoicesList} purchaseOrders={purchaseOrders} suppliers={suppliersList} />}
           {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} onDownload={downloadDocument} />}
           {view === "admin" && <Administration user={user} />}
@@ -963,7 +984,38 @@ function NewRequest({ step, setStep, form, setForm, submit, suppliers, approvers
 
 function Approvals({ requests, onAction, onSelect }: { requests: RequestItem[]; onAction: (id: string, action: "approve" | "reject") => void; onSelect: (request: RequestItem) => void }) { return <><PageHeader kicker="MATRIZ DE AUTORIDADE" title="Aprovações" description="Decida com contexto, evidência e impacto visíveis." /><div className="approval-list">{requests.length ? requests.map((request) => <article key={request.id} className="approval-item"><div className="approval-main"><span className="priority-flag"><AlertTriangle /></span><div><small>{request.id} • {request.tower}</small><h2>{request.subject}</h2><p>{request.supplier} • {request.costCenter} • submetido {request.submitted}</p></div></div><div className="approval-value"><small>VALOR TOTAL</small><strong>{money(request.value)}</strong><span className={statusClass(request.status)}>{request.sla}</span></div><div className="approval-actions"><Button variant="outline" onClick={() => onSelect(request)}><Eye /> Ver dossier</Button><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div></article>) : <div className="empty-state panel"><CheckCircle2 /><h3>Sem aprovações pendentes</h3><p>Todos os itens foram decididos.</p></div>}</div></>; }
 
-function SupplierPassportSheet({ supplier, onUploadDocument, onDownloadDocument }: { supplier: Supplier; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+function SupplierPassportSheet({
+  supplier,
+  onUploadDocument,
+  onDownloadDocument,
+  onUpdateBankDetails,
+}: {
+  supplier: Supplier;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+  onUpdateBankDetails: (id: number, fields: { iban?: string; bic?: string }) => Promise<void>;
+}) {
+  const [iban, setIban] = useState(supplier.iban ?? "");
+  const [bic, setBic] = useState(supplier.bic ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const [syncedSupplierId, setSyncedSupplierId] = useState(supplier.id);
+  if (supplier.id !== syncedSupplierId) {
+    setSyncedSupplierId(supplier.id);
+    setIban(supplier.iban ?? "");
+    setBic(supplier.bic ?? "");
+  }
+
+  const saveBankDetails = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onUpdateBankDetails(supplier.id, { iban, bic });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return <><SheetHeader><p className="kicker">SUPPLIER PASSPORT</p><SheetTitle>{supplier.name}</SheetTitle><SheetDescription>{supplier.category}</SheetDescription></SheetHeader><div className="sheet-body">
     <section className="supplier-summary">
       <article><ShieldCheck /><div><strong>{supplier.passport}%</strong><span>Supplier Passport</span></div></article>
@@ -971,16 +1023,38 @@ function SupplierPassportSheet({ supplier, onUploadDocument, onDownloadDocument 
       <article><AlertTriangle /><div><strong>{supplier.risk}</strong><span>Classificação de risco</span></div></article>
       <article><CheckCircle2 /><div><strong>{supplier.status}</strong><span>Estado</span></div></article>
     </section>
+    <div className="sheet-documents">
+      <div className="sheet-documents-head"><h3>Conta bancária (exportação ISO 20022)</h3></div>
+      <form onSubmit={saveBankDetails} className="form-grid">
+        <label className="form-field">IBAN<Input value={iban} onChange={(event) => setIban(event.target.value)} placeholder="AO06 0000 0000 0000 0000 0000 0" /></label>
+        <label className="form-field">BIC<Input value={bic} onChange={(event) => setBic(event.target.value)} placeholder="BAOAAOLU" /></label>
+        <div className="header-actions"><Button type="submit" size="sm" disabled={saving}>{saving ? "A guardar…" : "Guardar conta bancária"}</Button></div>
+      </form>
+    </div>
     <EntityDocuments entityType="supplier" entityId={String(supplier.id)} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
   </div></>;
 }
 
-function Suppliers({ search, suppliers, onInvite, onUploadDocument, onDownloadDocument }: { search: string; suppliers: Supplier[]; onInvite: () => void; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+function Suppliers({
+  search,
+  suppliers,
+  onInvite,
+  onUploadDocument,
+  onDownloadDocument,
+  onUpdateBankDetails,
+}: {
+  search: string;
+  suppliers: Supplier[];
+  onInvite: () => void;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+  onUpdateBankDetails: (id: number, fields: { iban?: string; bic?: string }) => Promise<void>;
+}) {
   const [selected, setSelected] = useState<Supplier | null>(null);
   const list = suppliers.filter((supplier) => supplier.name.toLowerCase().includes(search.toLowerCase()));
   const passportAvg = suppliers.length ? Math.round(suppliers.reduce((sum, item) => sum + item.passport, 0) / suppliers.length) : 0;
   return <><PageHeader kicker="SUPPLIER PASSPORT" title="Fornecedores" description="Onboarding, compliance, conteúdo local, risco e desempenho numa única vista." action={<Button className="btn-burgundy" onClick={onInvite}><Plus /> Convidar fornecedor</Button>} /><section className="supplier-summary"><article><Users /><div><strong>{suppliers.length}</strong><span>Fornecedores registados</span></div></article><article><ShieldCheck /><div><strong>{passportAvg}%</strong><span>Passport médio</span></div></article><article><Globe2 /><div><strong>{suppliers.filter((item) => item.status === "Activo").length}</strong><span>Fornecedores activos</span></div></article><article><AlertTriangle /><div><strong>{suppliers.filter((item) => item.status === "Revisão" || item.status === "Documentos").length}</strong><span>Revisões pendentes</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Categoria</TableHead><TableHead>Supplier Passport</TableHead><TableHead>Conteúdo local</TableHead><TableHead>Risco</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((supplier) => <TableRow key={supplier.id}><TableCell><strong>{supplier.name}</strong></TableCell><TableCell>{supplier.category}</TableCell><TableCell><div className="passport-cell"><Progress value={supplier.passport} /><span>{supplier.passport}%</span></div></TableCell><TableCell>{supplier.local}</TableCell><TableCell><span className={supplier.risk === "Baixo" ? "risk-low" : "risk-medium"}>{supplier.risk}</span></TableCell><TableCell><span className={statusClass(supplier.status)}>{supplier.status}</span></TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(supplier)} aria-label={`Ver Supplier Passport de ${supplier.name}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
-  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <SupplierPassportSheet supplier={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <SupplierPassportSheet supplier={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} onUpdateBankDetails={onUpdateBankDetails} />}</SheetContent></Sheet>
   </>;
 }
 
@@ -1105,7 +1179,7 @@ function Exceptions({ items, onResolve, onUploadDocument, onDownloadDocument }: 
   </>;
 }
 
-function Payments({ batches, onRelease }: { batches: PaymentBatch[]; onRelease: (id: string) => void }) { return <><PageHeader kicker="PAYMENT READINESS" title="Pagamentos" description="O Muntu prepara o lote, controla a evidência e o cliente mantém a libertação bancária." /><section className="payment-banner"><div><ShieldCheck /><span><strong>Segregação de funções preservada.</strong> Muntu prepara e recomenda; Finanças valida e liberta no banco.</span></div><Badge>0 RISCO DE CRÉDITO</Badge></section><div className="payment-grid">{batches.map((batch) => { const isReleased = batch.released || batch.status === "Pago"; return <article key={batch.id}><div><span className="payment-icon"><WalletCards /></span><span className={statusClass(isReleased ? "Pago" : "Aprovação")}>{isReleased ? "Pago" : "Pronto para libertar"}</span></div><small>{batch.id}</small><h2>{money(batch.value)}</h2><p>{batch.count} facturas • Data proposta: {batch.date}</p><div className="payment-checks">{isReleased ? <><span><CheckCircle2 /> Match concluído</span><span><CheckCircle2 /> Aprovações completas</span><span><CheckCircle2 /> Dados bancários verificados</span></> : <span className="muted"><Clock3 /> Aguarda validação e libertação bancária</span>}</div><Button className={isReleased ? "" : "btn-burgundy"} variant={isReleased ? "outline" : "default"} disabled={isReleased} onClick={() => onRelease(batch.id)}>{isReleased ? "Comprovativo disponível" : "Libertar para o banco"}</Button></article>; })}</div></>; }
+function Payments({ batches, onRelease, onExportIso20022 }: { batches: PaymentBatch[]; onRelease: (id: string) => void; onExportIso20022: (id: string) => void }) { return <><PageHeader kicker="PAYMENT READINESS" title="Pagamentos" description="O Muntu prepara o lote, controla a evidência e o cliente mantém a libertação bancária." /><section className="payment-banner"><div><ShieldCheck /><span><strong>Segregação de funções preservada.</strong> Muntu prepara e recomenda; Finanças valida e liberta no banco.</span></div><Badge>0 RISCO DE CRÉDITO</Badge></section><div className="payment-grid">{batches.map((batch) => { const isReleased = batch.released || batch.status === "Pago"; return <article key={batch.id}><div><span className="payment-icon"><WalletCards /></span><span className={statusClass(isReleased ? "Pago" : "Aprovação")}>{isReleased ? "Pago" : "Pronto para libertar"}</span></div><small>{batch.id}</small><h2>{money(batch.value)}</h2><p>{batch.count} facturas • Data proposta: {batch.date}</p><div className="payment-checks">{isReleased ? <><span><CheckCircle2 /> Match concluído</span><span><CheckCircle2 /> Aprovações completas</span><span><CheckCircle2 /> Dados bancários verificados</span></> : <span className="muted"><Clock3 /> Aguarda validação e libertação bancária</span>}</div><div className="header-actions"><Button className={isReleased ? "" : "btn-burgundy"} variant={isReleased ? "outline" : "default"} disabled={isReleased} onClick={() => onRelease(batch.id)}>{isReleased ? "Comprovativo disponível" : "Libertar para o banco"}</Button><Button variant="outline" onClick={() => onExportIso20022(batch.id)}><Download /> ISO 20022</Button></div></article>; })}</div></>; }
 
 function Reports({ requests, exceptions, invoices, purchaseOrders, suppliers }: { requests: RequestItem[]; exceptions: ExceptionItem[]; invoices: Invoice[]; purchaseOrders: PurchaseOrder[]; suppliers: Supplier[] }) {
   const openExceptions = exceptions.filter((item) => !item.resolved).length;
@@ -1153,7 +1227,7 @@ function Repository({ search, documents, onUpload, onDownload }: { search: strin
 ] as { label: string; Icon: typeof FileText; count: number }[]).map(({ label, Icon, count }, index) => <button className={index === 0 ? "active" : ""} key={label}><Icon /><span>{label}</span><b>{count}</b></button>)}</aside><div className="panel repository-table"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Documento</TableHead><TableHead>Tipo</TableHead><TableHead>Referência</TableHead><TableHead>Responsável</TableHead><TableHead>Versão</TableHead><TableHead>Actualizado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((doc) => <TableRow key={doc.id}><TableCell><div className="doc-name"><FileText /><strong>{doc.name}</strong></div></TableCell><TableCell>{doc.type}</TableCell><TableCell>{doc.request}</TableCell><TableCell>{doc.owner}</TableCell><TableCell>{doc.version}</TableCell><TableCell>{doc.updated}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => onDownload(doc)} aria-label={`Descarregar ${doc.name}`}><Download /></Button></TableCell></TableRow>)}</TableBody></Table></div></div></section></>;
 }
 
-type SsoDraft = { authMethod: string; ssoIssuerUrl: string; ssoClientId: string; ssoClientSecret: string };
+type SsoDraft = { authMethod: string; ssoIssuerUrl: string; ssoClientId: string; ssoClientSecret: string; iban: string; bic: string };
 
 function SsoSettings() {
   const [companiesList, setCompaniesList] = useState<CompanyRow[]>([]);
@@ -1170,7 +1244,14 @@ function SsoSettings() {
           Object.fromEntries(
             companies.map((company) => [
               company.id,
-              { authMethod: company.authMethod, ssoIssuerUrl: company.ssoIssuerUrl ?? "", ssoClientId: company.ssoClientId ?? "", ssoClientSecret: "" },
+              {
+                authMethod: company.authMethod,
+                ssoIssuerUrl: company.ssoIssuerUrl ?? "",
+                ssoClientId: company.ssoClientId ?? "",
+                ssoClientSecret: "",
+                iban: company.iban ?? "",
+                bic: company.bic ?? "",
+              },
             ])
           )
         );
@@ -1193,6 +1274,8 @@ function SsoSettings() {
         authMethod: draft.authMethod,
         ssoIssuerUrl: draft.ssoIssuerUrl,
         ssoClientId: draft.ssoClientId,
+        iban: draft.iban,
+        bic: draft.bic,
       };
       if (draft.ssoClientSecret) body.ssoClientSecret = draft.ssoClientSecret;
       const { company: updated } = await api<{ company: CompanyRow }>(`/api/admin/companies/${company.id}`, {
@@ -1201,19 +1284,19 @@ function SsoSettings() {
       });
       setCompaniesList((current) => current.map((row) => (row.id === company.id ? updated : row)));
       updateDraft(company.id, "ssoClientSecret", "");
-      toast.success(`SSO de ${updated.name} actualizado`);
+      toast.success(`${updated.name} actualizada`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar o SSO");
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar a empresa");
     } finally {
       setSavingId(null);
     }
   };
 
   return <article className="panel">
-    <div className="panel-heading"><div><p>IDENTIDADE</p><h2>SSO por empresa</h2></div></div>
+    <div className="panel-heading"><div><p>IDENTIDADE E PAGAMENTOS</p><h2>SSO e conta bancária por empresa</h2></div></div>
     <p className="muted">Cada empresa cliente escolhe o método de login pelo domínio do e-mail. SSO só produz um login funcional com credenciais reais de um fornecedor de identidade compatível com OpenID Connect Discovery — <code>redirect_uri</code> a configurar no IdP: <code>{typeof window !== "undefined" ? window.location.origin : ""}/api/auth/sso/callback</code>.</p>
     {companiesList.map((company) => {
-      const draft = drafts[company.id] ?? { authMethod: "password", ssoIssuerUrl: "", ssoClientId: "", ssoClientSecret: "" };
+      const draft = drafts[company.id] ?? { authMethod: "password", ssoIssuerUrl: "", ssoClientId: "", ssoClientSecret: "", iban: "", bic: "" };
       return <div key={company.id} className="sso-company-row">
         <div className="panel-heading"><div><p>{company.domain}</p><h3>{company.name}</h3></div></div>
         <div className="admin-fields">
@@ -1221,8 +1304,10 @@ function SsoSettings() {
           <label>Issuer URL<Input value={draft.ssoIssuerUrl} onChange={(event) => updateDraft(company.id, "ssoIssuerUrl", event.target.value)} placeholder="https://login.microsoftonline.com/<tenant-id>/v2.0" /></label>
           <label>Client ID<Input value={draft.ssoClientId} onChange={(event) => updateDraft(company.id, "ssoClientId", event.target.value)} /></label>
           <label>Client Secret<Input type="password" value={draft.ssoClientSecret} onChange={(event) => updateDraft(company.id, "ssoClientSecret", event.target.value)} placeholder={company.hasSsoClientSecret ? "•••••••• (definido — deixe em branco para manter)" : "Não definido"} /></label>
+          <label>IBAN (conta devedora, exportação ISO 20022)<Input value={draft.iban} onChange={(event) => updateDraft(company.id, "iban", event.target.value)} placeholder="AO06 0000 0000 0000 0000 0000 0" /></label>
+          <label>BIC<Input value={draft.bic} onChange={(event) => updateDraft(company.id, "bic", event.target.value)} placeholder="BAOAAOLU" /></label>
         </div>
-        <Button variant="outline" disabled={savingId === company.id} onClick={() => save(company)}>{savingId === company.id ? "A guardar…" : "Guardar SSO"}</Button>
+        <Button variant="outline" disabled={savingId === company.id} onClick={() => save(company)}>{savingId === company.id ? "A guardar…" : "Guardar"}</Button>
       </div>;
     })}
     {!loading && companiesList.length === 0 && <p className="muted">Sem empresas registadas.</p>}
@@ -1234,7 +1319,7 @@ function Administration({ user }: { user: AuthUser }) {
     <section className="admin-grid">
       <article className="panel"><div className="panel-heading"><div><p>ORGANIZAÇÃO</p><h2>{user.tenant}</h2></div><Badge>ANGOLA</Badge></div><div className="admin-fields"><label>Moeda principal<Input value="AOA — Kwanza angolano" readOnly /></label><label>Idioma<Input value="Português (Angola)" readOnly /></label><label>Fuso horário<Input value="Africa/Luanda (UTC+1)" readOnly /></label><label>Regime fiscal<Input value="Angola • IVA 14%" readOnly /></label></div></article>
       <SsoSettings />
-      <article className="panel integration-panel"><div className="panel-heading"><div><p>ROADMAP</p><h2>Integrações planeadas</h2></div></div>{[["ERP Financeiro", "SAP S/4HANA"], ["Banco", "Ficheiro ISO 20022"], ["Fiscalidade", "AGT / SAF-T"], ["Identidade", "Microsoft Entra ID (via SSO acima)"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass("Planeado")}>Planeado</b></div>)}</article>
+      <article className="panel integration-panel"><div className="panel-heading"><div><p>ROADMAP</p><h2>Integrações</h2></div></div>{[["Banco", "Ficheiro ISO 20022 (pain.001) — Pagamentos", "Activo"], ["ERP Financeiro", "SAP S/4HANA", "Planeado"], ["Fiscalidade", "AGT / SAF-T", "Planeado"], ["Identidade", "Microsoft Entra ID (via SSO acima)", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article>
     </section>
   </>;
 }
@@ -2029,6 +2114,8 @@ type CompanyRow = {
   ssoIssuerUrl: string | null;
   ssoClientId: string | null;
   hasSsoClientSecret: boolean;
+  iban: string | null;
+  bic: string | null;
 };
 type BillingRateRow = { key: string; label: string; amount: number; updatedAt: string };
 type ClientInvoiceRow = {

@@ -27,6 +27,10 @@ create table if not exists public.companies (
 -- actividade usa 0 para esta linha — Estudo de Viabilidade §32.4/53.1.
 alter table public.companies add column if not exists retainer_amount bigint not null default 0;
 
+-- Conta devedora para exportação ISO 20022 (pain.001) — ver lib/iso20022.ts.
+alter table public.companies add column if not exists iban text;
+alter table public.companies add column if not exists bic text;
+
 create table if not exists public.users (
   id bigint generated always as identity primary key,
   name text not null,
@@ -90,6 +94,11 @@ create table if not exists public.suppliers (
   status text not null default 'Documentos',
   created_at timestamptz not null default now()
 );
+
+-- Dados bancários para exportação ISO 20022 (pain.001) — curados pela
+-- Muntu, como risk/passport.
+alter table public.suppliers add column if not exists iban text;
+alter table public.suppliers add column if not exists bic text;
 
 -- Só para access_level = 'supplier': qual fornecedor este utilizador
 -- representa. Sem isto ligado, o utilizador não vê POs/recepções/

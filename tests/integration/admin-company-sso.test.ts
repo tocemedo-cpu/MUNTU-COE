@@ -92,6 +92,24 @@ describe("Company SSO admin UI", () => {
     expect(body.company.ssoClientId).toBeNull();
   });
 
+  it("sets the debtor IBAN/BIC used by the ISO 20022 export", async () => {
+    const db = getDb();
+    const [company] = await db.insert(companies).values({ name: "Cliente Conta Bancária", domain: uniqueDomain("iban") }).returning();
+
+    const response = await patchCompany(
+      jsonRequest(`http://localhost/api/admin/companies/${company.id}`, {
+        method: "PATCH",
+        session: { userId: 1, accessLevel: "system_admin" },
+        body: { iban: "AO06004000000123456789101", bic: "BAOAAOLU" },
+      }),
+      { params: Promise.resolve({ id: String(company.id) }) }
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.company.iban).toBe("AO06004000000123456789101");
+    expect(body.company.bic).toBe("BAOAAOLU");
+  });
+
   it("404s for an unknown company id", async () => {
     const response = await patchCompany(
       jsonRequest("http://localhost/api/admin/companies/999999999", {

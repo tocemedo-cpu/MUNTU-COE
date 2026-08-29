@@ -74,6 +74,11 @@ export const supplierUpdateSchema = z.object({
   passport: z.number().int().min(0).max(100).optional(),
   risk: z.enum(["Baixo", "Médio", "Alto"]).optional(),
   status: z.string().trim().max(60).optional(),
+  // Conta bancária — só usada por lib/iso20022.ts. Sem validação de
+  // formato: os padrões de IBAN/BIC variam por país e não vale a pena
+  // reimplementar aqui (a exportação já recusa com IBAN/BIC em branco).
+  iban: z.string().trim().max(34).optional(),
+  bic: z.string().trim().max(11).optional(),
 });
 
 // Auto-edição do fornecedor: só os campos que ele próprio pode declarar.
@@ -124,6 +129,9 @@ export const companyUpdateSchema = z.object({
   ssoIssuerUrl: z.string().trim().max(500).optional(),
   ssoClientId: z.string().trim().max(200).optional(),
   ssoClientSecret: z.string().trim().max(500).optional(),
+  // Conta devedora — só usada por lib/iso20022.ts.
+  iban: z.string().trim().max(34).optional(),
+  bic: z.string().trim().max(11).optional(),
 });
 
 export const supportTicketCreateSchema = z.object({

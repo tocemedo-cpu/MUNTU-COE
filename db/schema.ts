@@ -19,6 +19,11 @@ export const companies = pgTable("companies", {
   // actividade usa 0 para esta linha — ver Estudo de Viabilidade §32.4/53.1.
   retainerAmount: bigint("retainer_amount", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  // Conta devedora para exportação ISO 20022 (pain.001) — ver
+  // lib/iso20022.ts. Sem estes dois definidos, a exportação recusa (não
+  // há Document iniciador válido sem IBAN/BIC do devedor).
+  iban: text("iban"),
+  bic: text("bic"),
 });
 
 export const users = pgTable("users", {
@@ -88,6 +93,11 @@ export const suppliers = pgTable("suppliers", {
   local: text("local").notNull().default("0%"),
   status: text("status").notNull().default("Documentos"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  // Dados bancários para exportação ISO 20022 (pain.001) — ver
+  // lib/iso20022.ts. Curados pela Muntu, como risk/passport (a conta a
+  // pagar não deve depender do que o próprio fornecedor auto-declara).
+  iban: text("iban"),
+  bic: text("bic"),
 });
 
 export const purchaseOrders = pgTable("purchase_orders", {

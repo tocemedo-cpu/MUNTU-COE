@@ -23,6 +23,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const parsed = await parseJsonBody(request, isInternal ? supplierUpdateSchema : supplierSelfUpdateSchema);
   if (!parsed.success) return parsed.response;
 
+  // Um corpo só com campos que este schema não reconhece (ex.: um
+  // fornecedor a tentar mandar iban/bic, que supplierSelfUpdateSchema
+  // ignora) chega aqui como {} — sem esta guarda, o update()
+  // rebentava com "No values to set" em vez de responder com um erro
+  // claro.
+  if (Object.keys(parsed.data).length === 0) {
+    return Response.json({ error: "Nada para actualizar" }, { status: 400 });
+  }
+
   const [updated] = await db.update(suppliers).set(parsed.data).where(eq(suppliers.id, supplierId)).returning();
   return Response.json({ supplier: updated });
 }
