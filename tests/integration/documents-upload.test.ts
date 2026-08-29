@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { beforeAll, describe, expect, it } from "vitest";
-import { getDb, sessionHeaders } from "./helpers";
+import { getDb, jsonRequest, sessionHeaders } from "./helpers";
 import { seedIfEmpty } from "@/db/seed-data";
 import { documentFiles } from "@/db/schema";
 import { GET as listDocuments, POST as uploadDocument } from "@/app/api/documents/route";
@@ -39,9 +39,10 @@ describe("Real document upload/download (bytea round trip)", () => {
     const [fileRow] = await db.select().from(documentFiles).where(eq(documentFiles.documentId, uploadBody.document.id));
     expect(Buffer.from(fileRow.content).toString("utf-8")).toBe(content);
 
-    const downloadResponse = await downloadDocument(new Request(`http://localhost/api/documents/${uploadBody.document.id}/download`), {
-      params: Promise.resolve({ id: String(uploadBody.document.id) }),
-    });
+    const downloadResponse = await downloadDocument(
+      jsonRequest(`http://localhost/api/documents/${uploadBody.document.id}/download`, { method: "GET", session: { userId: 1, accessLevel: "system_admin" } }),
+      { params: Promise.resolve({ id: String(uploadBody.document.id) }) }
+    );
     expect(downloadResponse.status).toBe(200);
     expect(downloadResponse.headers.get("content-type")).toBe("text/plain");
     expect(downloadResponse.headers.get("content-disposition")).toContain("Teste_Real.txt");
@@ -65,21 +66,23 @@ describe("Real document upload/download (bytea round trip)", () => {
   });
 
   it("404s downloading a document that was never uploaded (id does not exist)", async () => {
-    const response = await downloadDocument(new Request("http://localhost/api/documents/999999999/download"), {
-      params: Promise.resolve({ id: "999999999" }),
-    });
+    const response = await downloadDocument(
+      jsonRequest("http://localhost/api/documents/999999999/download", { method: "GET", session: { userId: 1, accessLevel: "system_admin" } }),
+      { params: Promise.resolve({ id: "999999999" }) }
+    );
     expect(response.status).toBe(404);
   });
 
   it("a seeded demo document (metadata only, no real file) 404s on download instead of crashing", async () => {
-    const list = await listDocuments(new Request("http://localhost/api/documents"));
+    const list = await listDocuments(jsonRequest("http://localhost/api/documents", { method: "GET", session: { userId: 1, accessLevel: "system_admin" } }));
     const { documents: rows } = await list.json();
     const demoDoc = rows.find((d: { name: string }) => d.name === "Contrato_MRO_2026.pdf");
     expect(demoDoc).toBeTruthy();
 
-    const response = await downloadDocument(new Request(`http://localhost/api/documents/${demoDoc.id}/download`), {
-      params: Promise.resolve({ id: String(demoDoc.id) }),
-    });
+    const response = await downloadDocument(
+      jsonRequest(`http://localhost/api/documents/${demoDoc.id}/download`, { method: "GET", session: { userId: 1, accessLevel: "system_admin" } }),
+      { params: Promise.resolve({ id: String(demoDoc.id) }) }
+    );
     expect(response.status).toBe(404);
   });
 
@@ -89,8 +92,13 @@ describe("Real document upload/download (bytea round trip)", () => {
     form.append("file", file);
     await uploadDocument(requestWithForm("http://localhost/api/documents", form, { userId: 1, accessLevel: "system_admin" }));
 
-    const list = await listDocuments(new Request("http://localhost/api/documents?q=Outro"));
+    const list = await listDocuments(jsonRequest("http://localhost/api/documents?q=Outro", { method: "GET", session: { userId: 1, accessLevel: "system_admin" } }));
     const { documents: rows } = await list.json();
     expect(rows.some((d: { name: string }) => d.name === "Outro.txt")).toBe(true);
+  });
+
+  it("rejects a requester with no entity context from the general listing (403)", async () => {
+    const response = await listDocuments(jsonRequest("http://localhost/api/documents", { method: "GET", session: { userId: 1, accessLevel: "requester" } }));
+    expect(response.status).toBe(403);
   });
 });

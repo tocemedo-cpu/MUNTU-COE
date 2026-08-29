@@ -89,7 +89,7 @@ type RequestItem = {
 };
 
 type Supplier = { id: number; name: string; category: string; passport: number; risk: string; local: string; status: string };
-type PurchaseOrder = { id: string; supplier: string; description: string; value: number; status: string; nextAction: string; supplierId: number | null };
+type PurchaseOrder = { id: string; supplier: string; description: string; value: number; status: string; nextAction: string; supplierId: number | null; requestId: string | null };
 type Receipt = { id: number; po: string; description: string; supplier: string; value: number; progress: number; status: string };
 type Invoice = { id: string; supplier: string; po: string; value: number; match: string; status: string; due: string };
 type ExceptionItem = { id: string; title: string; ref: string; owner: string; cause: string; impact: string; resolved: boolean; createdAt: string };
@@ -613,20 +613,25 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     }
   };
 
-  const uploadDocument = async (file: File, options?: { type?: string; request?: string }) => {
+  const uploadDocument = async (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }): Promise<DocumentItem | null> => {
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("type", options?.type ?? "Geral");
       formData.append("request", options?.request ?? "—");
+      if (options?.entityType) formData.append("entityType", options.entityType);
+      if (options?.entityId) formData.append("entityId", options.entityId);
       const response = await fetch("/api/documents", { method: "POST", body: formData });
       if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Não foi possível carregar o documento");
-      setDocumentsList((items) => [data.document as DocumentItem, ...items]);
+      const created = data.document as DocumentItem;
+      setDocumentsList((items) => [created, ...items]);
       toast.success(`${file.name} adicionado ao repositório`);
+      return created;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível carregar o documento");
+      return null;
     }
   };
 
@@ -690,11 +695,11 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "new-request" && <NewRequest step={wizardStep} setStep={setWizardStep} form={form} setForm={setForm} submit={submitRequest} suppliers={suppliersList} approvers={approvers} onUploadDocument={uploadDocument} />}
           {view === "requests" && <RequestsTable title="Meus pedidos" subtitle="Acompanhe prioridade, responsável, etapa e SLA em tempo real." requests={filteredRequests} onSelect={setSelectedRequest} />}
           {view === "approvals" && <Approvals requests={requests.filter((item) => item.status === "Aprovação")} onAction={actOnRequest} onSelect={setSelectedRequest} />}
-          {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} />)}
-          {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} />}
-          {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} />}
-          {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} />}
-          {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} />}
+          {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />)}
+          {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} requests={requests} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "payments" && <Payments batches={paymentBatches} onRelease={releasePayment} />}
           {view === "reports" && <Reports requests={requests} exceptions={exceptionsList} invoices={invoicesList} purchaseOrders={purchaseOrders} suppliers={suppliersList} />}
           {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} onDownload={downloadDocument} />}
@@ -705,7 +710,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         </>}
       </main>
     </section>
-    <Sheet open={Boolean(selectedRequest)} onOpenChange={(open) => !open && setSelectedRequest(null)}><SheetContent className="request-sheet sm:max-w-xl">{selectedRequest && <RequestDetail request={selectedRequest} onAction={actOnRequest} canDecide={!isRequester} />}</SheetContent></Sheet>
+    <Sheet open={Boolean(selectedRequest)} onOpenChange={(open) => !open && setSelectedRequest(null)}><SheetContent className="request-sheet sm:max-w-xl">{selectedRequest && <RequestDetail request={selectedRequest} onAction={actOnRequest} canDecide={!isRequester} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}</SheetContent></Sheet>
   </div>;
 }
 
@@ -754,7 +759,26 @@ function NewRequest({ step, setStep, form, setForm, submit, suppliers, approvers
 
 function Approvals({ requests, onAction, onSelect }: { requests: RequestItem[]; onAction: (id: string, action: "approve" | "reject") => void; onSelect: (request: RequestItem) => void }) { return <><PageHeader kicker="MATRIZ DE AUTORIDADE" title="Aprovações" description="Decida com contexto, evidência e impacto visíveis." /><div className="approval-list">{requests.length ? requests.map((request) => <article key={request.id} className="approval-item"><div className="approval-main"><span className="priority-flag"><AlertTriangle /></span><div><small>{request.id} • {request.tower}</small><h2>{request.subject}</h2><p>{request.supplier} • {request.costCenter} • submetido {request.submitted}</p></div></div><div className="approval-value"><small>VALOR TOTAL</small><strong>{money(request.value)}</strong><span className={statusClass(request.status)}>{request.sla}</span></div><div className="approval-actions"><Button variant="outline" onClick={() => onSelect(request)}><Eye /> Ver dossier</Button><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div></article>) : <div className="empty-state panel"><CheckCircle2 /><h3>Sem aprovações pendentes</h3><p>Todos os itens foram decididos.</p></div>}</div></>; }
 
-function Suppliers({ search, suppliers, onInvite }: { search: string; suppliers: Supplier[]; onInvite: () => void }) { const list = suppliers.filter((supplier) => supplier.name.toLowerCase().includes(search.toLowerCase())); const passportAvg = suppliers.length ? Math.round(suppliers.reduce((sum, item) => sum + item.passport, 0) / suppliers.length) : 0; return <><PageHeader kicker="SUPPLIER PASSPORT" title="Fornecedores" description="Onboarding, compliance, conteúdo local, risco e desempenho numa única vista." action={<Button className="btn-burgundy" onClick={onInvite}><Plus /> Convidar fornecedor</Button>} /><section className="supplier-summary"><article><Users /><div><strong>{suppliers.length}</strong><span>Fornecedores registados</span></div></article><article><ShieldCheck /><div><strong>{passportAvg}%</strong><span>Passport médio</span></div></article><article><Globe2 /><div><strong>{suppliers.filter((item) => item.status === "Activo").length}</strong><span>Fornecedores activos</span></div></article><article><AlertTriangle /><div><strong>{suppliers.filter((item) => item.status === "Revisão" || item.status === "Documentos").length}</strong><span>Revisões pendentes</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Categoria</TableHead><TableHead>Supplier Passport</TableHead><TableHead>Conteúdo local</TableHead><TableHead>Risco</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((supplier) => <TableRow key={supplier.id}><TableCell><strong>{supplier.name}</strong></TableCell><TableCell>{supplier.category}</TableCell><TableCell><div className="passport-cell"><Progress value={supplier.passport} /><span>{supplier.passport}%</span></div></TableCell><TableCell>{supplier.local}</TableCell><TableCell><span className={supplier.risk === "Baixo" ? "risk-low" : "risk-medium"}>{supplier.risk}</span></TableCell><TableCell><span className={statusClass(supplier.status)}>{supplier.status}</span></TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`Supplier Passport: ${supplier.name}`)}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section></>; }
+function SupplierPassportSheet({ supplier, onUploadDocument, onDownloadDocument }: { supplier: Supplier; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  return <><SheetHeader><p className="kicker">SUPPLIER PASSPORT</p><SheetTitle>{supplier.name}</SheetTitle><SheetDescription>{supplier.category}</SheetDescription></SheetHeader><div className="sheet-body">
+    <section className="supplier-summary">
+      <article><ShieldCheck /><div><strong>{supplier.passport}%</strong><span>Supplier Passport</span></div></article>
+      <article><Globe2 /><div><strong>{supplier.local}</strong><span>Conteúdo local</span></div></article>
+      <article><AlertTriangle /><div><strong>{supplier.risk}</strong><span>Classificação de risco</span></div></article>
+      <article><CheckCircle2 /><div><strong>{supplier.status}</strong><span>Estado</span></div></article>
+    </section>
+    <EntityDocuments entityType="supplier" entityId={String(supplier.id)} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
+  </div></>;
+}
+
+function Suppliers({ search, suppliers, onInvite, onUploadDocument, onDownloadDocument }: { search: string; suppliers: Supplier[]; onInvite: () => void; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  const [selected, setSelected] = useState<Supplier | null>(null);
+  const list = suppliers.filter((supplier) => supplier.name.toLowerCase().includes(search.toLowerCase()));
+  const passportAvg = suppliers.length ? Math.round(suppliers.reduce((sum, item) => sum + item.passport, 0) / suppliers.length) : 0;
+  return <><PageHeader kicker="SUPPLIER PASSPORT" title="Fornecedores" description="Onboarding, compliance, conteúdo local, risco e desempenho numa única vista." action={<Button className="btn-burgundy" onClick={onInvite}><Plus /> Convidar fornecedor</Button>} /><section className="supplier-summary"><article><Users /><div><strong>{suppliers.length}</strong><span>Fornecedores registados</span></div></article><article><ShieldCheck /><div><strong>{passportAvg}%</strong><span>Passport médio</span></div></article><article><Globe2 /><div><strong>{suppliers.filter((item) => item.status === "Activo").length}</strong><span>Fornecedores activos</span></div></article><article><AlertTriangle /><div><strong>{suppliers.filter((item) => item.status === "Revisão" || item.status === "Documentos").length}</strong><span>Revisões pendentes</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Categoria</TableHead><TableHead>Supplier Passport</TableHead><TableHead>Conteúdo local</TableHead><TableHead>Risco</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((supplier) => <TableRow key={supplier.id}><TableCell><strong>{supplier.name}</strong></TableCell><TableCell>{supplier.category}</TableCell><TableCell><div className="passport-cell"><Progress value={supplier.passport} /><span>{supplier.passport}%</span></div></TableCell><TableCell>{supplier.local}</TableCell><TableCell><span className={supplier.risk === "Baixo" ? "risk-low" : "risk-medium"}>{supplier.risk}</span></TableCell><TableCell><span className={statusClass(supplier.status)}>{supplier.status}</span></TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(supplier)} aria-label={`Ver Supplier Passport de ${supplier.name}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <SupplierPassportSheet supplier={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  </>;
+}
 
 function SupplierProfile({ supplier, onUpdate }: { supplier: Supplier | undefined; onUpdate: (id: number, fields: { category?: string; local?: string }) => Promise<void> }) {
   const [category, setCategory] = useState(supplier?.category ?? "");
@@ -803,18 +827,79 @@ function SupplierProfile({ supplier, onUpdate }: { supplier: Supplier | undefine
   </>;
 }
 
-function PurchaseOrders({ purchaseOrders }: { purchaseOrders: PurchaseOrder[] }) { return <><PageHeader kicker="PURCHASE ORDER CONTROL TOWER" title="Ordens de compra" description="Emissão, confirmação, expediting, alterações e entrega controlados ponta-a-ponta." action={<Button variant="outline"><Download /> Exportar mapa</Button>} /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Fornecedor</TableHead><TableHead>Descrição</TableHead><TableHead>Valor AOA</TableHead><TableHead>Estado</TableHead><TableHead>Próxima acção</TableHead><TableHead /></TableRow></TableHeader><TableBody>{purchaseOrders.map((po) => <TableRow key={po.id}><TableCell><strong>{po.id}</strong></TableCell><TableCell>{po.supplier}</TableCell><TableCell>{po.description}</TableCell><TableCell>{money(po.value)}</TableCell><TableCell><span className={statusClass(po.status)}>{po.status}</span></TableCell><TableCell>{po.nextAction}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`Linha temporal de ${po.id}`)}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section></>; }
+function PurchaseOrderTimelineSheet({ po, request, onUploadDocument, onDownloadDocument }: { po: PurchaseOrder; request: RequestItem | undefined; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  // Linha temporal real, derivada dos timestamps que já existem — sem
+  // tabela de eventos nova (que precisaria de um caminho de escrita para
+  // cada transição de estado da PO, que este app ainda não tem). Só
+  // mostra o que é verdade: quando o pedido de origem foi submetido e
+  // decidido (se ligado), quando a PO foi criada, e o estado actual.
+  const events: { label: string; when: string }[] = [];
+  if (request) {
+    events.push({ label: `Pedido ${request.id} submetido`, when: request.submitted });
+    if (request.decidedAt) events.push({ label: "Pedido aprovado — PO gerada", when: formatElapsedPt(request.decidedAt) + " atrás" });
+  }
+  events.push({ label: `Estado actual: ${po.status}`, when: po.nextAction ? `Próxima acção: ${po.nextAction}` : "" });
 
-function Receipts({ receipts, onConfirm }: { receipts: Receipt[]; onConfirm: (id: number) => void }) { return <><PageHeader kicker="GOODS & SERVICE RECEIPT" title="Recepções" description="Confirme quantidade, qualidade, evidência e data para desbloquear a factura." /><div className="receipt-grid">{receipts.map((item) => <article className="receipt-card" key={item.id}><div><span className="receipt-icon"><PackageCheck /></span><span className={statusClass(item.status)}>{item.status}</span></div><small>{item.po}</small><h2>{item.description}</h2><p>{item.supplier}</p><strong>{money(item.value)}</strong><div className="receipt-progress"><Progress value={item.progress} /><span>{item.progress}% entregue</span></div><Button className={item.progress === 100 && item.status !== "Confirmada" ? "btn-burgundy" : ""} variant={item.progress === 100 && item.status !== "Confirmada" ? "default" : "outline"} disabled={item.status === "Confirmada"} onClick={() => item.progress === 100 ? onConfirm(item.id) : toast.info("Evidência aberta")}>{item.status === "Confirmada" ? "Recepção confirmada" : item.progress === 100 ? "Confirmar recepção" : "Ver evidência"}</Button></article>)}</div></>; }
-
-function Invoices({ search, invoices, onUploadDocument }: { search: string; invoices: Invoice[]; onUploadDocument: (file: File, options?: { type?: string; request?: string }) => void }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const list = invoices.filter((invoice) => [invoice.id, invoice.supplier, invoice.po, invoice.status].some((item) => item.toLowerCase().includes(search.toLowerCase())));
-  const touchless = invoices.length ? Math.round((invoices.filter((item) => item.match === "3-way match").length / invoices.length) * 100) : 0;
-  return <><PageHeader kicker="ACCOUNTS PAYABLE" title="Facturas & match" description="Recepção digital, validação fiscal, 2/3-way match e fila de excepções." action={<><input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadDocument(file, { type: "Factura" }); event.target.value = ""; }} /><Button className="btn-burgundy" onClick={() => fileInputRef.current?.click()}><UploadCloud /> Carregar factura</Button></>} /><section className="match-summary"><article><FileCheck2 /><div><strong>{touchless}%</strong><span>Touchless match</span></div></article><article><AlertTriangle /><div><strong>{invoices.filter((item) => item.status === "Excepção").length}</strong><span>Excepções abertas</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Fornecedor</TableHead><TableHead>PO</TableHead><TableHead>Valor</TableHead><TableHead>Match</TableHead><TableHead>Estado</TableHead><TableHead>Vencimento</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((invoice) => <TableRow key={invoice.id}><TableCell><strong>{invoice.id}</strong></TableCell><TableCell>{invoice.supplier}</TableCell><TableCell>{invoice.po}</TableCell><TableCell>{money(invoice.value)}</TableCell><TableCell>{invoice.match}</TableCell><TableCell><span className={statusClass(invoice.status)}>{invoice.status}</span></TableCell><TableCell>{invoice.due}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`Imagem e match de ${invoice.id}`)}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section></>;
+  return <><SheetHeader><p className="kicker">LINHA TEMPORAL DA PO</p><SheetTitle>{po.id}</SheetTitle><SheetDescription>{po.description}</SheetDescription></SheetHeader><div className="sheet-body">
+    <div className="sheet-value"><small>VALOR</small><strong>{money(po.value)}</strong><p>{po.supplier}</p></div>
+    <div className="timeline"><h3>Histórico</h3>{events.map((event, index) => <div key={event.label} className={index < events.length - 1 ? "complete" : "current"}><span>{index < events.length - 1 ? <Check /> : events.length}</span><div><strong>{event.label}</strong><small>{event.when}</small></div></div>)}</div>
+    <EntityDocuments entityType="purchase_order" entityId={po.id} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
+  </div></>;
 }
 
-function Exceptions({ items, onResolve }: { items: ExceptionItem[]; onResolve: (id: string) => void }) { return <><PageHeader kicker="RESOLUÇÃO HUMANA" title="Excepções" description="A tecnologia identifica. O Muntu coordena pessoas, evidência e decisão até ao encerramento." /><div className="exception-list">{items.map((item) => <article key={item.id} className={item.resolved ? "resolved" : ""}><span className="exception-severity"><AlertTriangle /></span><div className="exception-copy"><small>{item.id} • {item.ref}</small><h2>{item.title}</h2><p>Responsável: <strong>{item.owner}</strong> • Causa: <strong>{item.cause}</strong> • Idade: <strong>{formatElapsedPt(item.createdAt)}</strong> • Impacto: <strong>{item.impact}</strong></p></div><div className="exception-actions">{item.resolved ? <span className="resolved-label"><CheckCircle2 /> Resolvida</span> : <><Button variant="outline" onClick={() => toast.info(`Dossier ${item.id} aberto`)}><Eye /> Evidência</Button><Button className="btn-burgundy" onClick={() => onResolve(item.id)}>Resolver <ArrowRight /></Button></>}</div></article>)}{items.length === 0 && <div className="empty-state panel"><CheckCircle2 /><h3>Sem excepções</h3><p>Não existem excepções registadas.</p></div>}</div></>; }
+function PurchaseOrders({ purchaseOrders, requests, onUploadDocument, onDownloadDocument }: { purchaseOrders: PurchaseOrder[]; requests: RequestItem[]; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  const [selected, setSelected] = useState<PurchaseOrder | null>(null);
+  return <><PageHeader kicker="PURCHASE ORDER CONTROL TOWER" title="Ordens de compra" description="Emissão, confirmação, expediting, alterações e entrega controlados ponta-a-ponta." action={<Button variant="outline"><Download /> Exportar mapa</Button>} /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Fornecedor</TableHead><TableHead>Descrição</TableHead><TableHead>Valor AOA</TableHead><TableHead>Estado</TableHead><TableHead>Próxima acção</TableHead><TableHead /></TableRow></TableHeader><TableBody>{purchaseOrders.map((po) => <TableRow key={po.id}><TableCell><strong>{po.id}</strong></TableCell><TableCell>{po.supplier}</TableCell><TableCell>{po.description}</TableCell><TableCell>{money(po.value)}</TableCell><TableCell><span className={statusClass(po.status)}>{po.status}</span></TableCell><TableCell>{po.nextAction}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(po)} aria-label={`Ver linha temporal de ${po.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <PurchaseOrderTimelineSheet po={selected} request={requests.find((item) => item.id === selected.requestId)} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  </>;
+}
+
+function ReceiptEvidenceSheet({ receipt, onUploadDocument, onDownloadDocument }: { receipt: Receipt; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  return <><SheetHeader><p className="kicker">EVIDÊNCIA DE RECEPÇÃO</p><SheetTitle>{receipt.po}</SheetTitle><SheetDescription>{receipt.description}</SheetDescription></SheetHeader><div className="sheet-body">
+    <div className="sheet-status"><span className={statusClass(receipt.status)}>{receipt.status}</span></div>
+    <div className="sheet-value"><small>VALOR</small><strong>{money(receipt.value)}</strong><p>{receipt.supplier} • {receipt.progress}% entregue</p></div>
+    <EntityDocuments entityType="receipt" entityId={String(receipt.id)} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
+  </div></>;
+}
+
+function Receipts({ receipts, onConfirm, onUploadDocument, onDownloadDocument }: { receipts: Receipt[]; onConfirm: (id: number) => void; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  const [selected, setSelected] = useState<Receipt | null>(null);
+  return <><PageHeader kicker="GOODS & SERVICE RECEIPT" title="Recepções" description="Confirme quantidade, qualidade, evidência e data para desbloquear a factura." /><div className="receipt-grid">{receipts.map((item) => <article className="receipt-card" key={item.id}><div><span className="receipt-icon"><PackageCheck /></span><span className={statusClass(item.status)}>{item.status}</span></div><small>{item.po}</small><h2>{item.description}</h2><p>{item.supplier}</p><strong>{money(item.value)}</strong><div className="receipt-progress"><Progress value={item.progress} /><span>{item.progress}% entregue</span></div><Button className={item.progress === 100 && item.status !== "Confirmada" ? "btn-burgundy" : ""} variant={item.progress === 100 && item.status !== "Confirmada" ? "default" : "outline"} disabled={item.status === "Confirmada"} onClick={() => (item.progress === 100 ? onConfirm(item.id) : setSelected(item))}>{item.status === "Confirmada" ? "Recepção confirmada" : item.progress === 100 ? "Confirmar recepção" : "Ver evidência"}</Button></article>)}</div>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <ReceiptEvidenceSheet receipt={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  </>;
+}
+
+function InvoiceMatchSheet({ invoice, onUploadDocument, onDownloadDocument }: { invoice: Invoice; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  return <><SheetHeader><p className="kicker">IMAGEM E MATCH</p><SheetTitle>{invoice.id}</SheetTitle><SheetDescription>{invoice.supplier} • {invoice.po}</SheetDescription></SheetHeader><div className="sheet-body">
+    <div className="sheet-status"><span className={statusClass(invoice.status)}>{invoice.status}</span><span>{invoice.match}</span></div>
+    <div className="sheet-value"><small>VALOR</small><strong>{money(invoice.value)}</strong><p>Vencimento: {invoice.due}</p></div>
+    <EntityDocuments entityType="invoice" entityId={invoice.id} title="Imagem da factura" onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
+  </div></>;
+}
+
+function Invoices({ search, invoices, onUploadDocument, onDownloadDocument }: { search: string; invoices: Invoice[]; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selected, setSelected] = useState<Invoice | null>(null);
+  const list = invoices.filter((invoice) => [invoice.id, invoice.supplier, invoice.po, invoice.status].some((item) => item.toLowerCase().includes(search.toLowerCase())));
+  const touchless = invoices.length ? Math.round((invoices.filter((item) => item.match === "3-way match").length / invoices.length) * 100) : 0;
+  return <><PageHeader kicker="ACCOUNTS PAYABLE" title="Facturas & match" description="Recepção digital, validação fiscal, 2/3-way match e fila de excepções." action={<><input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadDocument(file, { type: "Factura" }); event.target.value = ""; }} /><Button className="btn-burgundy" onClick={() => fileInputRef.current?.click()}><UploadCloud /> Carregar factura</Button></>} /><section className="match-summary"><article><FileCheck2 /><div><strong>{touchless}%</strong><span>Touchless match</span></div></article><article><AlertTriangle /><div><strong>{invoices.filter((item) => item.status === "Excepção").length}</strong><span>Excepções abertas</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Fornecedor</TableHead><TableHead>PO</TableHead><TableHead>Valor</TableHead><TableHead>Match</TableHead><TableHead>Estado</TableHead><TableHead>Vencimento</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((invoice) => <TableRow key={invoice.id}><TableCell><strong>{invoice.id}</strong></TableCell><TableCell>{invoice.supplier}</TableCell><TableCell>{invoice.po}</TableCell><TableCell>{money(invoice.value)}</TableCell><TableCell>{invoice.match}</TableCell><TableCell><span className={statusClass(invoice.status)}>{invoice.status}</span></TableCell><TableCell>{invoice.due}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(invoice)} aria-label={`Ver imagem e match de ${invoice.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <InvoiceMatchSheet invoice={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  </>;
+}
+
+function ExceptionEvidenceSheet({ item, onUploadDocument, onDownloadDocument }: { item: ExceptionItem; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  return <><SheetHeader><p className="kicker">DOSSIER DE EXCEPÇÃO</p><SheetTitle>{item.id}</SheetTitle><SheetDescription>{item.title}</SheetDescription></SheetHeader><div className="sheet-body">
+    <div className="sheet-value"><small>REFERÊNCIA</small><strong>{item.ref}</strong><p>Responsável: {item.owner} • Causa: {item.cause} • Idade: {formatElapsedPt(item.createdAt)} • Impacto: {item.impact}</p></div>
+    <EntityDocuments entityType="exception" entityId={item.id} title="Evidência" onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
+  </div></>;
+}
+
+function Exceptions({ items, onResolve, onUploadDocument, onDownloadDocument }: { items: ExceptionItem[]; onResolve: (id: string) => void; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+  const [selected, setSelected] = useState<ExceptionItem | null>(null);
+  return <><PageHeader kicker="RESOLUÇÃO HUMANA" title="Excepções" description="A tecnologia identifica. O Muntu coordena pessoas, evidência e decisão até ao encerramento." /><div className="exception-list">{items.map((item) => <article key={item.id} className={item.resolved ? "resolved" : ""}><span className="exception-severity"><AlertTriangle /></span><div className="exception-copy"><small>{item.id} • {item.ref}</small><h2>{item.title}</h2><p>Responsável: <strong>{item.owner}</strong> • Causa: <strong>{item.cause}</strong> • Idade: <strong>{formatElapsedPt(item.createdAt)}</strong> • Impacto: <strong>{item.impact}</strong></p></div><div className="exception-actions">{item.resolved ? <span className="resolved-label"><CheckCircle2 /> Resolvida</span> : <><Button variant="outline" onClick={() => setSelected(item)}><Eye /> Evidência</Button><Button className="btn-burgundy" onClick={() => onResolve(item.id)}>Resolver <ArrowRight /></Button></>}</div></article>)}{items.length === 0 && <div className="empty-state panel"><CheckCircle2 /><h3>Sem excepções</h3><p>Não existem excepções registadas.</p></div>}</div>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <ExceptionEvidenceSheet item={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  </>;
+}
 
 function Payments({ batches, onRelease }: { batches: PaymentBatch[]; onRelease: (id: string) => void }) { return <><PageHeader kicker="PAYMENT READINESS" title="Pagamentos" description="O Muntu prepara o lote, controla a evidência e o cliente mantém a libertação bancária." /><section className="payment-banner"><div><ShieldCheck /><span><strong>Segregação de funções preservada.</strong> Muntu prepara e recomenda; Finanças valida e liberta no banco.</span></div><Badge>0 RISCO DE CRÉDITO</Badge></section><div className="payment-grid">{batches.map((batch) => { const isReleased = batch.released || batch.status === "Pago"; return <article key={batch.id}><div><span className="payment-icon"><WalletCards /></span><span className={statusClass(isReleased ? "Pago" : "Aprovação")}>{isReleased ? "Pago" : "Pronto para libertar"}</span></div><small>{batch.id}</small><h2>{money(batch.value)}</h2><p>{batch.count} facturas • Data proposta: {batch.date}</p><div className="payment-checks">{isReleased ? <><span><CheckCircle2 /> Match concluído</span><span><CheckCircle2 /> Aprovações completas</span><span><CheckCircle2 /> Dados bancários verificados</span></> : <span className="muted"><Clock3 /> Aguarda validação e libertação bancária</span>}</div><Button className={isReleased ? "" : "btn-burgundy"} variant={isReleased ? "outline" : "default"} disabled={isReleased} onClick={() => onRelease(batch.id)}>{isReleased ? "Comprovativo disponível" : "Libertar para o banco"}</Button></article>; })}</div></>; }
 
@@ -1399,7 +1484,62 @@ function SupportInbox() {
   </>;
 }
 
-function RequestDetail({ request, onAction, canDecide }: { request: RequestItem; onAction: (id: string, action: "approve" | "reject") => void; canDecide: boolean }) { return <><SheetHeader><p className="kicker">DOSSIER DA TRANSACÇÃO</p><SheetTitle>{request.id}</SheetTitle><SheetDescription>{request.subject}</SheetDescription></SheetHeader><div className="sheet-body"><div className="sheet-status"><span className={statusClass(request.status)}>{request.status}</span><span className={request.sla.includes("Vencido") ? "text-danger" : ""}><Clock3 /> {request.sla}</span></div><div className="sheet-value"><small>VALOR</small><strong>{money(request.value)}</strong><p>{request.supplier} • {request.costCenter}</p></div><div className="timeline"><h3>Workflow</h3>{stages.map((stage, index) => <div key={stage} className={index < request.stage ? "complete" : index === request.stage ? "current" : ""}><span>{index < request.stage ? <Check /> : index + 1}</span><div><strong>{stage}</strong><small>{index < request.stage ? "Concluído" : index === request.stage ? "Em curso • Muntu Operations" : "A aguardar"}</small></div></div>)}</div><div className="sheet-documents"><h3>Documentos</h3><button><FileText /><span><strong>Requisição e justificativo.pdf</strong><small>Actualizado {request.submitted}</small></span><Download /></button><button><FileText /><span><strong>Proposta do fornecedor.pdf</strong><small>Versão validada</small></span><Download /></button></div><div className="audit-note"><ShieldCheck /><span><strong>Auditoria activa</strong>Todas as decisões, alterações e anexos ficam registados.</span></div></div>{canDecide && request.status === "Aprovação" && <div className="sheet-actions"><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div>}</>; }
+// Documentos reais ligados a uma entidade concreta (pedido, fornecedor,
+// factura, recepção, excepção, PO) — substitui os botões "Ver
+// evidência"/"Ver Supplier Passport"/etc. que antes só disparavam um
+// toast, e o par de nomes de ficheiro fixos que existia no dossier do
+// pedido. Um único componente partilhado por todos, apoiado em
+// GET/POST /api/documents?entityType=&entityId= (lib/document-access.ts
+// decide quem pode ver/anexar cada entidade).
+function EntityDocuments({
+  entityType,
+  entityId,
+  title = "Documentos",
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  entityType: string;
+  entityId: string;
+  title?: string;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
+  const [docs, setDocs] = useState<DocumentItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const { documents } = await api<{ documents: DocumentItem[] }>(`/api/documents?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`);
+        if (!cancelled) setDocs(documents);
+      } catch {
+        if (!cancelled) setDocs([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entityType, entityId]);
+
+  const attach = async (file: File) => {
+    const created = await onUploadDocument(file, { entityType, entityId, type: title });
+    if (created) setDocs((items) => [created, ...items]);
+  };
+
+  return <div className="sheet-documents">
+    <div className="sheet-documents-head">
+      <h3>{title}</h3>
+      <input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) attach(file); event.target.value = ""; }} />
+      <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}><UploadCloud /> Anexar</Button>
+    </div>
+    {loading ? <p className="muted">A carregar…</p> : docs.length === 0 ? <p className="muted">Sem documentos anexados.</p> : docs.map((doc) => <button key={doc.id} onClick={() => onDownloadDocument(doc)}><FileText /><span><strong>{doc.name}</strong><small>{doc.owner} • {doc.updated}</small></span><Download /></button>)}
+  </div>;
+}
+
+function RequestDetail({ request, onAction, canDecide, onUploadDocument, onDownloadDocument }: { request: RequestItem; onAction: (id: string, action: "approve" | "reject") => void; canDecide: boolean; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) { return <><SheetHeader><p className="kicker">DOSSIER DA TRANSACÇÃO</p><SheetTitle>{request.id}</SheetTitle><SheetDescription>{request.subject}</SheetDescription></SheetHeader><div className="sheet-body"><div className="sheet-status"><span className={statusClass(request.status)}>{request.status}</span><span className={request.sla.includes("Vencido") ? "text-danger" : ""}><Clock3 /> {request.sla}</span></div><div className="sheet-value"><small>VALOR</small><strong>{money(request.value)}</strong><p>{request.supplier} • {request.costCenter}</p></div><div className="timeline"><h3>Workflow</h3>{stages.map((stage, index) => <div key={stage} className={index < request.stage ? "complete" : index === request.stage ? "current" : ""}><span>{index < request.stage ? <Check /> : index + 1}</span><div><strong>{stage}</strong><small>{index < request.stage ? "Concluído" : index === request.stage ? "Em curso • Muntu Operations" : "A aguardar"}</small></div></div>)}</div><EntityDocuments entityType="request" entityId={request.id} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} /><div className="audit-note"><ShieldCheck /><span><strong>Auditoria activa</strong>Todas as decisões, alterações e anexos ficam registados.</span></div></div>{canDecide && request.status === "Aprovação" && <div className="sheet-actions"><Button variant="outline" className="reject-button" onClick={() => onAction(request.id, "reject")}><XCircle /> Devolver</Button><Button className="btn-green" onClick={() => onAction(request.id, "approve")}><Check /> Aprovar</Button></div>}</>; }
 
 export default function HomePage() {
   const [screen, setScreen] = useState<"public" | "login" | "admin-login" | "portal">("public");

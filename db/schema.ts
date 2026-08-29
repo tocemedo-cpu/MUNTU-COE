@@ -209,6 +209,16 @@ export const documents = pgTable("documents", {
   updated: text("updated").notNull(),
   contentType: text("content_type"),
   size: integer("size"),
+  // Ligação real a quem este documento pertence — "request" | "supplier" |
+  // "invoice" | "receipt" | "exception" | "purchase_order", com entityId a
+  // guardar o id dessa linha (todos os tipos de PK coercem bem para
+  // texto). Substitui o antigo padrão de só ter `request` como texto
+  // livre, que nunca ligava de verdade a nada fora dos pedidos — é o que
+  // alimenta os botões "Ver evidência"/"Ver Supplier Passport"/etc. que
+  // antes só mostravam um toast. Nulo para uploads gerais do Repositório,
+  // sem entidade específica.
+  entityType: text("entity_type"),
+  entityId: text("entity_id"),
 });
 
 // Ficheiro real associado a um `documents.id` — separado da tabela acima

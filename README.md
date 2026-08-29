@@ -150,7 +150,15 @@ A versão inicial deste portal veio de um mockup estático: vários números no 
 - **Anexos no wizard e upload de factura** — chamam o upload real (`/api/documents`) já usado no Repositório, em vez de um toast "de demonstração" que não gravava nada.
 - **Idade das excepções** — calculada a cada render a partir de `exceptions.created_at` (`formatElapsedPt`), em vez de um texto tipo "2h 14m" gravado uma vez e nunca mais actualizado.
 
-Deliberadamente deixados de fora desta ronda (funcionalidade nova, não substituição de dado fixo por real): os botões "Ver" de Supplier Passport, linha temporal da PO, imagem/match de factura e dossier de excepção continuam a abrir só um toast — precisam de tabelas novas (histórico, imagens, anexos de evidência) que ainda não existem.
+## Documentos ligados a uma entidade (Supplier Passport, linha temporal da PO, evidência)
+
+Os botões "Ver" que antes só abriam um `toast.info()` — Supplier Passport, linha temporal da PO, imagem/match de factura, evidência de excepção e de recepção — agora abrem um `Sheet` real. O mais grave dos dois problemas que isto resolve nem era um botão morto: o dossier de um pedido (`RequestDetail`) mostrava sempre os mesmos dois nomes de ficheiro fixos no código (`Requisição e justificativo.pdf`, `Proposta do fornecedor.pdf`), iguais para qualquer pedido, sem nenhum handler a reagir ao clique.
+
+`documents` ganhou `entity_type`/`entity_id` (substitui o antigo padrão de só ter `request` como texto livre, que nunca ligava a nada fora dos pedidos). `GET /api/documents?entityType=&entityId=` e o `POST` equivalente servem os cinco ecrãs através de um único componente partilhado (`EntityDocuments`) e uma única função de autorização (`lib/document-access.ts#canAccessDocumentEntity`), que replica as mesmas regras de dono/mesma-empresa/mesmo-fornecedor já aplicadas nas rotas de cada entidade — um `requester` só vê os documentos do seu próprio pedido, um `supplier` só os do seu próprio fornecedor/facturas/recepções, `company_admin`/`analyst` só os da sua âmbito, `coe_manager`/`system_admin` sempre.
+
+Isto obrigou a abrir `/api/documents` a qualquer sessão válida no `middleware.ts` (deixou de estar restrito a `company_admin`/`analyst`/`coe_manager`/`system_admin`) — a autorização real passou a ser por linha, feita no próprio handler, o mesmo padrão já usado por `/api/requests`/`/api/suppliers`. Isto também corrigiu um bug real descoberto ao construir isto: o anexo do wizard de novo pedido (`NewRequest`, adicionado numa ronda anterior) nunca tinha sido testado como `requester` — só como `system_admin` — e teria falhado com `403` para a persona que mais usa esse fluxo, porque `/api/documents` excluía `requester` por completo.
+
+A linha temporal da PO é derivada, não fabricada: junta o `createdAt`/`decidedAt` reais do pedido de origem (quando existe `requestId`) com o estado actual da PO — sem tabela de eventos nova, que precisaria de um caminho de escrita para cada transição de estado que este app ainda não tem.
 
 ## Rotas de API
 
@@ -177,7 +185,7 @@ Deliberadamente deixados de fora desta ronda (funcionalidade nova, não substitu
 | `/api/exceptions/:id` | `PATCH` | Resolver excepção |
 | `/api/payments` | `GET` | Lotes de pagamento |
 | `/api/payments/:id` | `PATCH` | Libertar pagamento |
-| `/api/documents` | `GET`, `POST` | Repositório documental — `POST` é upload real (`multipart/form-data`, campo `file`, até 15 MB) |
+| `/api/documents` | `GET`, `POST` | Repositório documental — `POST` é upload real (`multipart/form-data`, campo `file`, até 15 MB); com `?entityType=&entityId=` (ou os mesmos campos no `POST`), lista/anexa documentos de uma entidade concreta (pedido, fornecedor, factura, recepção, excepção, PO) — âmbito real por linha, não por nível de acesso (ver `lib/document-access.ts`) |
 | `/api/documents/:id/download` | `GET` | Descarrega os bytes reais do ficheiro carregado |
 | `/api/admin/users` | `GET` | Lista todos os utilizadores (só `system_admin`) |
 | `/api/admin/users/:id` | `PATCH` | Muda o nível de acesso/empresa de um utilizador (só `system_admin`) |

@@ -2,14 +2,9 @@ import { and, eq, like, or, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests, users } from "@/db/schema";
 import { getSession } from "@/lib/authz";
+import { formatPtDateTime } from "@/lib/format";
 import { computeRequestSlaDueAt } from "@/lib/requests-sla";
 import { parseJsonBody, requestCreateSchema } from "@/lib/validation";
-
-function formatSubmittedLabel(date: Date): string {
-  return new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
-    .format(date)
-    .replace(".", "");
-}
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -71,7 +66,7 @@ export async function POST(request: Request) {
     sla,
     slaDueAt,
     stage: 1,
-    submitted: formatSubmittedLabel(now),
+    submitted: formatPtDateTime(now),
     supplier: payload.supplier ?? "",
     costCenter: payload.costCenter ?? "",
   };

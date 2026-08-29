@@ -31,7 +31,12 @@ const ROUTE_ACCESS: { prefix: string; allow: AccessLevel[] }[] = [
   { prefix: "/api/invoices", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
   { prefix: "/api/exceptions", allow: ["company_admin", "analyst", "coe_manager", "system_admin"] },
   { prefix: "/api/payments", allow: ["company_admin", "analyst", "coe_manager", "system_admin"] },
-  { prefix: "/api/documents", allow: ["company_admin", "analyst", "coe_manager", "system_admin"] },
+  // /api/documents não tem entrada aqui de propósito: um requisitante ou
+  // fornecedor precisa de conseguir aceder aos documentos ligados à sua
+  // própria entidade (o seu pedido, o seu fornecedor). A autorização real
+  // é por linha — feita no próprio handler via
+  // lib/document-access.ts#canAccessDocumentEntity — não por nível de
+  // acesso sozinho.
 ];
 
 export async function middleware(request: NextRequest) {

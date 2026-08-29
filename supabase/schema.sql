@@ -184,6 +184,15 @@ create table if not exists public.documents (
 alter table public.documents add column if not exists content_type text;
 alter table public.documents add column if not exists size integer;
 
+-- Ligação real a quem o documento pertence — "request" | "supplier" |
+-- "invoice" | "receipt" | "exception" | "purchase_order", com entity_id a
+-- guardar o id dessa linha. Alimenta os botões "Ver evidência"/"Ver
+-- Supplier Passport"/etc. no frontend (lib/document-access.ts decide
+-- quem pode aceder a cada entidade). Nulo para uploads gerais do
+-- Repositório, sem entidade específica.
+alter table public.documents add column if not exists entity_type text;
+alter table public.documents add column if not exists entity_id text;
+
 -- Ficheiro real associado a um documento — separado de `documents` para
 -- que listar/pesquisar nunca puxe os bytes de todos os ficheiros para
 -- memória; só a rota de download toca esta tabela.
