@@ -63,6 +63,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { SUPPORT_CATEGORIES, SUPPORT_PRIORITIES, SUPPORT_STATUSES } from "@/lib/support";
+import { bucketRequestsByMonth, computeAvgCycleDays, computeSlaOnTimePct } from "@/lib/requests-sla";
 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
@@ -82,13 +83,18 @@ type RequestItem = {
   submitted: string;
   supplier: string;
   costCenter: string;
+  createdAt: string;
+  slaDueAt: string | null;
+  decidedAt: string | null;
 };
 
 type Supplier = { id: number; name: string; category: string; passport: number; risk: string; local: string; status: string };
-type PurchaseOrder = { id: string; supplier: string; description: string; value: number; status: string; nextAction: string };
+type PurchaseOrder = { id: string; supplier: string; description: string; value: number; status: string; nextAction: string; supplierId: number | null };
 type Receipt = { id: number; po: string; description: string; supplier: string; value: number; progress: number; status: string };
 type Invoice = { id: string; supplier: string; po: string; value: number; match: string; status: string; due: string };
-type ExceptionItem = { id: string; title: string; ref: string; owner: string; age: string; impact: string; resolved: boolean };
+type ExceptionItem = { id: string; title: string; ref: string; owner: string; cause: string; impact: string; resolved: boolean; createdAt: string };
+type Approver = { id: number; name: string; role: string; accessLevel: AccessLevel };
+type PublicStats = { activeRequests: number; slaOnTimePct: number; avgCycleDays: number } | null;
 type PaymentBatch = { id: string; date: string; count: number; value: number; status: string; released: boolean };
 type DocumentItem = { id: number; name: string; type: string; request: string; owner: string; version: string; updated: string };
 type AccessLevel = "system_admin" | "coe_manager" | "analyst" | "supplier" | "company_admin" | "requester";
@@ -97,6 +103,19 @@ type AuthUser = { id: number; name: string; email: string; role: string; initial
 const stages = ["Intake", "Validação", "Aprovação", "PO", "Receção", "Factura", "Excepção", "Pagamento"];
 
 const money = (value: number) => new Intl.NumberFormat("pt-AO", { style: "currency", currency: "AOA", maximumFractionDigits: 0 }).format(value);
+
+// Idade calculada a cada render a partir de um timestamp real, em vez de
+// um texto tipo "2h 14m" gravado uma vez na base de dados e nunca mais
+// actualizado.
+function formatElapsedPt(fromIso: string): string {
+  const ms = Date.now() - new Date(fromIso).getTime();
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 60) return `${Math.max(minutes, 0)}min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ${String(hours % 24).padStart(2, "0")}h`;
+}
 
 const statusClass = (status: string) => {
   if (["Pago", "Activo", "Validada", "Aprovado", "Concluído", "Confirmada"].includes(status)) return "status status-green";
@@ -148,7 +167,7 @@ function Brand({ compact = false, inverse = false, onSecretUnlock }: { compact?:
   </div>;
 }
 
-function PublicSite({ onLogin, onSecretAdminLogin }: { onLogin: () => void; onSecretAdminLogin: () => void }) {
+function PublicSite({ onLogin, onSecretAdminLogin, publicStats }: { onLogin: () => void; onSecretAdminLogin: () => void; publicStats: PublicStats }) {
   return <div className="public-site">
     <header className="public-header">
       <Brand onSecretUnlock={onSecretAdminLogin} />
@@ -168,7 +187,7 @@ function PublicSite({ onLogin, onSecretAdminLogin }: { onLogin: () => void; onSe
         <div className="hero-visual">
           <img src="/muntu/hero-coe.png" alt="Equipa africana do Muntu COE numa reunião de operações Oil & Gas" />
           <div className="hero-float hero-float-top"><span className="live-dot" /> Operação acompanhada em tempo real</div>
-          <div className="hero-float hero-float-bottom"><Gauge /><div><strong>96,4%</strong><span>SLA dentro do prazo</span></div></div>
+          <div className="hero-float hero-float-bottom"><Gauge /><div><strong>{publicStats ? `${publicStats.slaOnTimePct}%` : "—"}</strong><span>SLA dentro do prazo</span></div></div>
         </div>
       </section>
 
@@ -205,12 +224,14 @@ function Login({
   initialError,
   resetToken,
   onResetTokenConsumed,
+  publicStats,
 }: {
   onBack: () => void;
   onSuccess: (user: AuthUser) => void;
   initialError?: string;
   resetToken?: string;
   onResetTokenConsumed: () => void;
+  publicStats: PublicStats;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -303,7 +324,7 @@ function Login({
   };
 
   return <main className="login-page">
-    <section className="login-visual"><button className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button><Brand inverse /><div className="login-message"><Badge>PORTAL OPERACIONAL</Badge><h1>Todos os pedidos. Todos os intervenientes. Um único fluxo.</h1><p>Acompanhe o trabalho do intake ao pagamento, com SLA, documentação e responsabilidades visíveis.</p><div className="login-stats"><div><strong>96,4%</strong><span>SLA</span></div><div><strong>42</strong><span>pedidos activos</span></div><div><strong>3,2d</strong><span>ciclo médio</span></div></div></div></section>
+    <section className="login-visual"><button className="back-link" onClick={onBack}><ArrowRight /> Voltar ao site</button><Brand inverse /><div className="login-message"><Badge>PORTAL OPERACIONAL</Badge><h1>Todos os pedidos. Todos os intervenientes. Um único fluxo.</h1><p>Acompanhe o trabalho do intake ao pagamento, com SLA, documentação e responsabilidades visíveis.</p><div className="login-stats"><div><strong>{publicStats ? `${publicStats.slaOnTimePct}%` : "—"}</strong><span>SLA</span></div><div><strong>{publicStats ? publicStats.activeRequests : "—"}</strong><span>pedidos activos</span></div><div><strong>{publicStats ? `${publicStats.avgCycleDays.toString().replace(".", ",")}d` : "—"}</strong><span>ciclo médio</span></div></div></div></section>
     <section className="login-panel"><div className="login-card"><div className="mobile-login-brand"><Brand /></div><p className="kicker">BEM-VINDO DE VOLTA</p><h2>Aceda ao Muntu COE</h2>
       {step === "email" && !ssoCompanyName && <p className="muted">Introduza o seu e-mail — o portal identifica automaticamente o seu perfil e decide se é SSO ou palavra-passe.</p>}
       {step === "email" && !ssoCompanyName && <form onSubmit={continueWithEmail}>
@@ -441,7 +462,13 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
 
   const [selectedRequest, setSelectedRequest] = useState<RequestItem | null>(null);
   const [wizardStep, setWizardStep] = useState(1);
-  const [form, setForm] = useState({ tower: "Requisition-to-PO", type: "PO standard", subject: "", costCenter: "OFS-OPS-210", supplier: "Kwanza Industrial", value: "", due: "", approver: "João Sebastião — Director de Operações", priority: "Média", notes: "" });
+  const [approvers, setApprovers] = useState<Approver[]>([]);
+  // Sem valores por omissão fixos no código (antes "Kwanza Industrial",
+  // "OFS-OPS-210", "João Sebastião — Director de Operações" para todos os
+  // utilizadores, de qualquer empresa) — o fornecedor e o aprovador ficam
+  // vazios até serem escolhidos ou preenchidos com o primeiro dado real
+  // recebido da API (ver efeito abaixo).
+  const [form, setForm] = useState({ tower: "Requisition-to-PO", type: "PO standard", subject: "", costCenter: "", supplier: "", value: "", due: "", approver: "", priority: "Média", notes: "" });
 
   const isRequester = user.accessLevel === "requester";
 
@@ -452,13 +479,15 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         // Um "requester" está bloqueado no servidor para as rotas de
         // execução P2P — nem sequer as chama, para não rebentar o
         // carregamento do portal com um 403 dentro do Promise.all.
-        const [r, s] = await Promise.all([
+        const [r, s, ap] = await Promise.all([
           api<{ requests: RequestItem[] }>("/api/requests"),
           api<{ suppliers: Supplier[] }>("/api/suppliers"),
+          api<{ approvers: Approver[] }>("/api/approvers"),
         ]);
         if (cancelled) return;
         setRequests(r.requests);
         setSuppliersList(s.suppliers);
+        setApprovers(ap.approvers);
 
         if (!isRequester) {
           const [po, rc, inv, exc, pay, doc] = await Promise.all([
@@ -485,6 +514,18 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Preenche o fornecedor/aprovador do wizard com o primeiro dado real
+  // assim que chega — só se o utilizador ainda não escolheu nada, para
+  // nunca substituir uma escolha já feita.
+  useEffect(() => {
+    if (suppliersList.length === 0) return;
+    setForm((current) => (current.supplier ? current : { ...current, supplier: suppliersList[0].name }));
+  }, [suppliersList]);
+  useEffect(() => {
+    if (approvers.length === 0) return;
+    setForm((current) => (current.approver ? current : { ...current, approver: `${approvers[0].name} — ${approvers[0].role}` }));
+  }, [approvers]);
 
   const go = (next: PortalView) => { setView(next); setSidebarOpen(false); setSearch(""); };
 
@@ -572,12 +613,12 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     }
   };
 
-  const uploadDocument = async (file: File) => {
+  const uploadDocument = async (file: File, options?: { type?: string; request?: string }) => {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("type", "Geral");
-      formData.append("request", "—");
+      formData.append("type", options?.type ?? "Geral");
+      formData.append("request", options?.request ?? "—");
       const response = await fetch("/api/documents", { method: "POST", body: formData });
       if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
       const data = await response.json().catch(() => ({}));
@@ -612,23 +653,50 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const approvalsCount = requests.filter((item) => item.status === "Aprovação").length;
   const exceptionsCount = exceptionsList.filter((item) => !item.resolved).length;
 
+  // Substitui os 3 alertas fixos no código (sempre os mesmos, para
+  // qualquer utilizador, em qualquer sessão) por uma lista real derivada
+  // do que já está carregado — excepções abertas mais antigas primeiro,
+  // pedidos à espera de decisão (só para quem pode decidir) e recepções
+  // prontas a confirmar. Sem tabela de notificações nova: é só uma leitura
+  // do estado já em memória, recalculada a cada render.
+  const notifications = useMemo(() => {
+    type Notification = { key: string; Icon: typeof AlertTriangle; text: React.ReactNode };
+    const items: Notification[] = [];
+    [...exceptionsList]
+      .filter((item) => !item.resolved)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .slice(0, 2)
+      .forEach((item) => items.push({ key: `exc-${item.id}`, Icon: AlertTriangle, text: <><b>{item.ref}</b> está em excepção há {formatElapsedPt(item.createdAt)}.</> }));
+    if (!isRequester) {
+      requests
+        .filter((item) => item.status === "Aprovação")
+        .slice(0, 2)
+        .forEach((item) => items.push({ key: `req-${item.id}`, Icon: ClipboardCheck, text: <><b>{item.id}</b> aguarda a sua aprovação.</> }));
+    }
+    receiptsList
+      .filter((item) => item.progress === 100 && item.status !== "Confirmada")
+      .slice(0, 2)
+      .forEach((item) => items.push({ key: `rec-${item.id}`, Icon: PackageCheck, text: <><b>{item.po}</b> está pronto para recepção.</> }));
+    return items.slice(0, 5);
+  }, [exceptionsList, requests, receiptsList, isRequester]);
+
   return <div className="portal-shell"><Toaster richColors position="top-right" />
     {sidebarOpen && <button className="mobile-overlay" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}
     <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}><div className="sidebar-brand"><Brand /><button aria-label="Fechar menu" onClick={() => setSidebarOpen(false)}><X /></button></div><div className="tenant"><span>{user.initials.slice(0, 2)}</span><div><strong>{user.tenant}</strong><small>ANGOLA • PRODUÇÃO</small></div></div><nav>{navigation.map((group) => { const items = group.items.filter((item) => VIEW_ROLES[item.id].includes(user.accessLevel)); return items.length ? <div className="nav-group" key={group.group}><p>{group.group}</p>{items.map((item) => { const Icon = item.icon; const count = item.id === "approvals" ? approvalsCount : item.id === "exceptions" ? exceptionsCount : item.id === "requests" ? requests.length : item.id === "invoices" ? invoicesList.filter((invoice) => invoice.status === "Excepção").length : undefined; return <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => go(item.id)}><Icon /><span>{item.label}</span>{count ? <b>{count}</b> : null}</button>; })}</div> : null; })}</nav><div className="sidebar-help"><ShieldCheck /><div><strong>Centro de controlo</strong><span>Operação acompanhada pelo Muntu COE</span></div></div></aside>
-    <section className="portal-main"><header className="topbar"><div className="topbar-left"><button className="menu-button" aria-label="Abrir menu" onClick={() => setSidebarOpen(true)}><Menu /></button><div><small>MUNTU COE / {user.role.toUpperCase()}</small><strong>{viewLabels[view]}</strong></div></div><div className="topbar-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pesquisar pedido, PO, factura ou fornecedor…" /></div><div className="topbar-actions"><Button className="btn-burgundy quick-new" onClick={() => go("new-request")}><Plus /> Novo pedido</Button><div className="notification-wrap"><Button size="icon" variant="outline" aria-label="Notificações" onClick={() => setNotificationsOpen((open) => !open)}><Bell /><span className="notification-dot">3</span></Button>{notificationsOpen && <div className="notification-panel"><div><strong>Notificações</strong><button onClick={() => setNotificationsOpen(false)}><X /></button></div><article><AlertTriangle /><span><b>FT-2026-1192</b> está em excepção há 2 horas.</span></article><article><ClipboardCheck /><span><b>REQ-2026-0814</b> aguarda a sua aprovação.</span></article><article><PackageCheck /><span><b>PO-6100380</b> está pronto para recepção.</span></article></div>}</div><div className="user-menu"><span>{user.initials}</span><div><strong>{user.name}</strong><small>{user.role}</small></div><button aria-label="Terminar sessão" onClick={onLogout}><LogOut /></button></div></div></header>
+    <section className="portal-main"><header className="topbar"><div className="topbar-left"><button className="menu-button" aria-label="Abrir menu" onClick={() => setSidebarOpen(true)}><Menu /></button><div><small>MUNTU COE / {user.role.toUpperCase()}</small><strong>{viewLabels[view]}</strong></div></div><div className="topbar-search"><Search /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Pesquisar pedido, PO, factura ou fornecedor…" /></div><div className="topbar-actions"><Button className="btn-burgundy quick-new" onClick={() => go("new-request")}><Plus /> Novo pedido</Button><div className="notification-wrap"><Button size="icon" variant="outline" aria-label="Notificações" onClick={() => setNotificationsOpen((open) => !open)}><Bell />{notifications.length > 0 && <span className="notification-dot">{notifications.length}</span>}</Button>{notificationsOpen && <div className="notification-panel"><div><strong>Notificações</strong><button onClick={() => setNotificationsOpen(false)}><X /></button></div>{notifications.length === 0 ? <p className="muted">Sem notificações novas.</p> : notifications.map(({ key, Icon, text }) => <article key={key}><Icon /><span>{text}</span></article>)}</div>}</div><div className="user-menu"><span>{user.initials}</span><div><strong>{user.name}</strong><small>{user.role}</small></div><button aria-label="Terminar sessão" onClick={onLogout}><LogOut /></button></div></div></header>
       <main className="workspace">
         {loading ? <div className="empty-state panel"><Sparkles /><h3>A carregar o portal…</h3><p>A ligar à base de dados do Muntu COE.</p></div> : <>
           {view === "dashboard" && <Dashboard requests={requests} go={go} setSelectedRequest={setSelectedRequest} />}
-          {view === "new-request" && <NewRequest step={wizardStep} setStep={setWizardStep} form={form} setForm={setForm} submit={submitRequest} suppliers={suppliersList} />}
+          {view === "new-request" && <NewRequest step={wizardStep} setStep={setWizardStep} form={form} setForm={setForm} submit={submitRequest} suppliers={suppliersList} approvers={approvers} onUploadDocument={uploadDocument} />}
           {view === "requests" && <RequestsTable title="Meus pedidos" subtitle="Acompanhe prioridade, responsável, etapa e SLA em tempo real." requests={filteredRequests} onSelect={setSelectedRequest} />}
           {view === "approvals" && <Approvals requests={requests.filter((item) => item.status === "Aprovação")} onAction={actOnRequest} onSelect={setSelectedRequest} />}
           {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} />)}
           {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} />}
-          {view === "invoices" && <Invoices search={search} invoices={invoicesList} />}
+          {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} />}
           {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} />}
           {view === "payments" && <Payments batches={paymentBatches} onRelease={releasePayment} />}
-          {view === "reports" && <Reports requests={requests} exceptions={exceptionsList} />}
+          {view === "reports" && <Reports requests={requests} exceptions={exceptionsList} invoices={invoicesList} purchaseOrders={purchaseOrders} suppliers={suppliersList} />}
           {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} onDownload={downloadDocument} />}
           {view === "admin" && <Administration user={user} />}
           {view === "users" && <UsersAdmin />}
@@ -649,10 +717,16 @@ function Dashboard({ requests, go, setSelectedRequest }: { requests: RequestItem
   const totalValue = requests.reduce((sum, item) => sum + item.value, 0);
   const pipelineCounts = stages.map((_, index) => requests.filter((item) => item.stage === index).length);
   const highestApproval = requests.filter((item) => item.status === "Aprovação").sort((a, b) => b.value - a.value)[0];
+  // Única fonte real de "SLA no prazo" e "ciclo médio" — ver
+  // lib/requests-sla.ts. Substitui os 96,4%/3,2 dias/78% fixos no código
+  // que existiam aqui antes, sem nenhuma ligação aos dados reais.
+  const slaOnTimePct = computeSlaOnTimePct(requests);
+  const avgCycleDays = computeAvgCycleDays(requests);
+  const decidedCount = requests.filter((item) => item.decidedAt).length;
 
   return <><PageHeader kicker="VISÃO GERAL" title="Bom dia." description="A sua operação P2P está sob controlo, com dados actualizados directamente da base de dados." action={<Button className="btn-burgundy" onClick={() => go("new-request")}><Plus /> Criar pedido</Button>} />
-    <section className="metric-grid"><article><span className="metric-icon burgundy"><Inbox /></span><div><small>PEDIDOS ACTIVOS</small><strong>{active}</strong><p>{requests.length} no total</p></div></article><article><span className="metric-icon amber"><Clock3 /></span><div><small>EM APROVAÇÃO</small><strong>{inApproval}</strong><p>Requer decisão</p></div></article><article><span className="metric-icon green"><CheckCircle2 /></span><div><small>SLA NO PRAZO</small><strong>96,4%</strong><p><b>+2,1 pp</b> vs. mês anterior</p></div></article><article><span className="metric-icon slate"><CircleDollarSign /></span><div><small>VALOR EM FLUXO</small><strong>{money(totalValue)}</strong><p>{requests.length} transacções</p></div></article></section>
-    <section className="dashboard-grid"><article className="panel pipeline-panel"><div className="panel-heading"><div><p>WORKFLOW P2P</p><h2>Transacções por etapa</h2></div><button onClick={() => go("reports")}>Ver relatório <ArrowRight /></button></div><div className="pipeline-list">{pipelineCounts.map((count, index) => <button key={stages[index]} onClick={() => go(index < 3 ? "requests" : index === 3 ? "pos" : index === 4 ? "receipts" : index === 5 ? "invoices" : index === 6 ? "exceptions" : "payments")}><span>{String(index + 1).padStart(2, "0")}</span><strong>{stages[index]}</strong><b>{count}</b>{index < stages.length - 1 && <ChevronRight />}</button>)}</div><div className="cycle-summary"><div><strong>3,2 dias</strong><span>Ciclo médio end-to-end</span></div><Progress value={78} /><small>Meta: ≤ 4 dias • 78% concluídos sem intervenção manual</small></div></article>
+    <section className="metric-grid"><article><span className="metric-icon burgundy"><Inbox /></span><div><small>PEDIDOS ACTIVOS</small><strong>{active}</strong><p>{requests.length} no total</p></div></article><article><span className="metric-icon amber"><Clock3 /></span><div><small>EM APROVAÇÃO</small><strong>{inApproval}</strong><p>Requer decisão</p></div></article><article><span className="metric-icon green"><CheckCircle2 /></span><div><small>SLA NO PRAZO</small><strong>{slaOnTimePct}%</strong><p>{decidedCount} de {requests.length} pedidos decididos</p></div></article><article><span className="metric-icon slate"><CircleDollarSign /></span><div><small>VALOR EM FLUXO</small><strong>{money(totalValue)}</strong><p>{requests.length} transacções</p></div></article></section>
+    <section className="dashboard-grid"><article className="panel pipeline-panel"><div className="panel-heading"><div><p>WORKFLOW P2P</p><h2>Transacções por etapa</h2></div><button onClick={() => go("reports")}>Ver relatório <ArrowRight /></button></div><div className="pipeline-list">{pipelineCounts.map((count, index) => <button key={stages[index]} onClick={() => go(index < 3 ? "requests" : index === 3 ? "pos" : index === 4 ? "receipts" : index === 5 ? "invoices" : index === 6 ? "exceptions" : "payments")}><span>{String(index + 1).padStart(2, "0")}</span><strong>{stages[index]}</strong><b>{count}</b>{index < stages.length - 1 && <ChevronRight />}</button>)}</div><div className="cycle-summary"><div><strong>{avgCycleDays ? `${avgCycleDays.toString().replace(".", ",")} dias` : "—"}</strong><span>Ciclo médio de decisão</span></div><Progress value={slaOnTimePct} /><small>Meta: ≤ 4 dias • {slaOnTimePct}% dentro do SLA</small></div></article>
       <article className="panel attention-panel"><div className="panel-heading"><div><p>PRIORIDADE</p><h2>Requer a sua atenção</h2></div><Badge className="badge-alert">{inApproval} itens</Badge></div><button onClick={() => go("approvals")}><span className="attention-icon amber"><ClipboardCheck /></span><div><strong>{inApproval} pedidos por aprovar</strong><p>{highestApproval ? `Maior valor: ${money(highestApproval.value)}` : "Sem pedidos pendentes"}</p></div><ChevronRight /></button><button onClick={() => go("exceptions")}><span className="attention-icon red"><AlertTriangle /></span><div><strong>Excepções abertas</strong><p>Ver fila de resolução</p></div><ChevronRight /></button><button onClick={() => go("receipts")}><span className="attention-icon slate"><PackageCheck /></span><div><strong>Recepções pendentes</strong><p>Confirme para desbloquear pagamentos</p></div><ChevronRight /></button><div className="coe-note"><Sparkles /><div><strong>Muntu Operations</strong><p>A equipa já contactou o fornecedor e preparou a evidência para a sua decisão.</p></div></div></article></section>
     <section className="panel recent-panel"><div className="panel-heading"><div><p>ACTIVIDADE</p><h2>Pedidos recentes</h2></div><button onClick={() => go("requests")}>Ver todos <ArrowRight /></button></div><RequestRows requests={requests.slice(0, 4)} onSelect={setSelectedRequest} /></section>
   </>;
@@ -662,12 +736,18 @@ function RequestRows({ requests, onSelect }: { requests: RequestItem[]; onSelect
 
 function RequestsTable({ title, subtitle, requests, onSelect }: { title: string; subtitle: string; requests: RequestItem[]; onSelect: (request: RequestItem) => void }) { return <><PageHeader kicker="WORKFLOW E REPOSITÓRIO" title={title} description={subtitle} action={<div className="header-actions"><Button variant="outline"><Filter /> Filtros</Button><Button variant="outline"><Download /> Exportar</Button></div>} /><section className="filter-chips"><button className="active">Todos <b>{requests.length}</b></button><button>Em curso <b>{requests.filter((item) => !["Pago", "Rejeitado"].includes(item.status)).length}</b></button><button>Excepções <b>{requests.filter((item) => item.status === "Excepção").length}</b></button></section><section className="panel"><RequestRows requests={requests} onSelect={onSelect} />{requests.length === 0 && <div className="empty-state"><Search /><h3>Nenhum resultado</h3><p>Experimente pesquisar por outro pedido, fornecedor ou estado.</p></div>}</section></>; }
 
-function NewRequest({ step, setStep, form, setForm, submit, suppliers }: { step: number; setStep: (step: number) => void; form: Record<string, string>; setForm: React.Dispatch<React.SetStateAction<{ tower: string; type: string; subject: string; costCenter: string; supplier: string; value: string; due: string; approver: string; priority: string; notes: string }>>; submit: () => void; suppliers: Supplier[] }) {
+function NewRequest({ step, setStep, form, setForm, submit, suppliers, approvers, onUploadDocument }: { step: number; setStep: (step: number) => void; form: Record<string, string>; setForm: React.Dispatch<React.SetStateAction<{ tower: string; type: string; subject: string; costCenter: string; supplier: string; value: string; due: string; approver: string; priority: string; notes: string }>>; submit: () => void; suppliers: Supplier[]; approvers: Approver[]; onUploadDocument: (file: File, options?: { type?: string; request?: string }) => void }) {
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const attachFile = (file: File) => {
+    onUploadDocument(file, { type: "Pedido", request: form.subject || "Novo pedido" });
+    setAttachedFiles((current) => [...current, file.name]);
+  };
   return <><PageHeader kicker="INTAKE E TRIAGEM" title="Novo pedido" description="Uma entrada estruturada alimenta workflow, SLA e repositório automaticamente." /><section className="wizard-shell"><div className="wizard-progress">{["Tipo", "Detalhes", "Aprovação", "Confirmar"].map((label, index) => <button key={label} className={step === index + 1 ? "active" : step > index + 1 ? "done" : ""} onClick={() => step > index + 1 && setStep(index + 1)}><span>{step > index + 1 ? <Check /> : index + 1}</span><div><strong>{label}</strong><small>{["Torre e transacção", "Dados e anexos", "Matriz e SLA", "Revisão final"][index]}</small></div></button>)}</div><div className="wizard-content">
     {step === 1 && <div className="wizard-step"><p className="kicker">PASSO 1 DE 4</p><h2>Que trabalho precisa de iniciar?</h2><p>Escolha a torre operacional e o tipo de transacção.</p><div className="option-grid"><button className={form.tower === "Requisition-to-PO" ? "selected" : ""} onClick={() => update("tower", "Requisition-to-PO")}><ShoppingCart /><span><strong>Requisition-to-PO</strong><small>Criação, validação, aprovação e emissão de PO</small></span>{form.tower === "Requisition-to-PO" && <CheckCircle2 />}</button><button className={form.tower === "PO-to-Receipt" ? "selected" : ""} onClick={() => update("tower", "PO-to-Receipt")}><PackageCheck /><span><strong>PO-to-Receipt</strong><small>Expediting, entrega, qualidade e recepção</small></span>{form.tower === "PO-to-Receipt" && <CheckCircle2 />}</button><button className={form.tower === "Invoice-to-Pay" ? "selected" : ""} onClick={() => update("tower", "Invoice-to-Pay")}><ReceiptText /><span><strong>Invoice-to-Pay</strong><small>Factura, match, excepção e preparação do pagamento</small></span>{form.tower === "Invoice-to-Pay" && <CheckCircle2 />}</button><button className={form.tower === "Supplier Management" ? "selected" : ""} onClick={() => update("tower", "Supplier Management")}><Users /><span><strong>Supplier Management</strong><small>Onboarding, Supplier Passport, risco e desempenho</small></span>{form.tower === "Supplier Management" && <CheckCircle2 />}</button></div><label className="form-field">Tipo de transacção<NativeSelect value={form.type} onChange={(event) => update("type", event.target.value)} className="field-control"><NativeSelectOption>PO standard</NativeSelectOption><NativeSelectOption>PO catalogado</NativeSelectOption><NativeSelectOption>Serviço técnico</NativeSelectOption><NativeSelectOption>Compra urgente</NativeSelectOption><NativeSelectOption>Contrato / Call-off</NativeSelectOption></NativeSelect></label></div>}
-    {step === 2 && <div className="wizard-step"><p className="kicker">PASSO 2 DE 4</p><h2>Detalhes do pedido</h2><p>Inclua informação suficiente para a validação começar sem devoluções.</p><div className="form-grid"><label className="form-field span-2">Título do pedido<Input value={form.subject} onChange={(event) => update("subject", event.target.value)} placeholder="Ex.: Válvulas de controlo para campanha offshore" /></label><label className="form-field">Centro de custo<Input value={form.costCenter} onChange={(event) => update("costCenter", event.target.value)} /></label><label className="form-field">Fornecedor preferencial<NativeSelect value={form.supplier} onChange={(event) => update("supplier", event.target.value)} className="field-control">{suppliers.map((supplier) => <NativeSelectOption key={supplier.name}>{supplier.name}</NativeSelectOption>)}</NativeSelect></label><label className="form-field">Valor estimado (AOA)<Input inputMode="numeric" value={form.value} onChange={(event) => update("value", event.target.value)} placeholder="84 000 000" /></label><label className="form-field">Data necessária<Input type="date" value={form.due} onChange={(event) => update("due", event.target.value)} /></label><label className="form-field span-2">Escopo e contexto<Textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Explique a necessidade, o local de entrega e os requisitos críticos…" /></label><button className="upload-zone span-2" onClick={() => toast.success("Anexo de demonstração adicionado")}><UploadCloud /><strong>Adicionar documentos</strong><span>Especificação, cotação, desenho ou justificativo • PDF, XLSX, DOCX, ZIP</span></button></div></div>}
-    {step === 3 && <div className="wizard-step"><p className="kicker">PASSO 3 DE 4</p><h2>Aprovação e prioridade</h2><p>A regra sugerida usa o valor, centro de custo e tipo de pedido.</p><div className="approval-card"><span><ShieldCheck /></span><div><small>ROTA RECOMENDADA</small><strong>Solicitante → Director de Operações → Finanças</strong><p>O Muntu valida o dossier antes de iniciar a aprovação. Valor acima de AOA 50M requer dupla aprovação.</p></div></div><div className="form-grid"><label className="form-field span-2">Aprovador principal<NativeSelect value={form.approver} onChange={(event) => update("approver", event.target.value)} className="field-control"><NativeSelectOption>João Sebastião — Director de Operações</NativeSelectOption><NativeSelectOption>Maria José — Directora Financeira</NativeSelectOption><NativeSelectOption>Paulo Agostinho — Director de Supply Chain</NativeSelectOption></NativeSelect></label><label className="form-field">Prioridade<NativeSelect value={form.priority} onChange={(event) => update("priority", event.target.value)} className="field-control"><NativeSelectOption>Normal</NativeSelectOption><NativeSelectOption>Média</NativeSelectOption><NativeSelectOption>Alta</NativeSelectOption></NativeSelect></label><label className="form-field">SLA inicial<Input value={form.priority === "Alta" ? "4 horas" : form.priority === "Média" ? "8 horas" : "16 horas"} readOnly /></label></div><div className="sla-note"><Clock3 /><span><strong>O relógio começa após a submissão.</strong> Pausas e devoluções ficam registadas na auditoria.</span></div></div>}
+    {step === 2 && <div className="wizard-step"><p className="kicker">PASSO 2 DE 4</p><h2>Detalhes do pedido</h2><p>Inclua informação suficiente para a validação começar sem devoluções.</p><div className="form-grid"><label className="form-field span-2">Título do pedido<Input value={form.subject} onChange={(event) => update("subject", event.target.value)} placeholder="Ex.: Válvulas de controlo para campanha offshore" /></label><label className="form-field">Centro de custo<Input value={form.costCenter} onChange={(event) => update("costCenter", event.target.value)} /></label><label className="form-field">Fornecedor preferencial<NativeSelect value={form.supplier} onChange={(event) => update("supplier", event.target.value)} className="field-control">{suppliers.map((supplier) => <NativeSelectOption key={supplier.name}>{supplier.name}</NativeSelectOption>)}</NativeSelect></label><label className="form-field">Valor estimado (AOA)<Input inputMode="numeric" value={form.value} onChange={(event) => update("value", event.target.value)} placeholder="84 000 000" /></label><label className="form-field">Data necessária<Input type="date" value={form.due} onChange={(event) => update("due", event.target.value)} /></label><label className="form-field span-2">Escopo e contexto<Textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Explique a necessidade, o local de entrega e os requisitos críticos…" /></label><input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) attachFile(file); event.target.value = ""; }} /><button type="button" className="upload-zone span-2" onClick={() => fileInputRef.current?.click()}><UploadCloud /><strong>Adicionar documentos</strong><span>{attachedFiles.length === 0 ? "Especificação, cotação, desenho ou justificativo • PDF, XLSX, DOCX, ZIP" : `${attachedFiles.length} documento${attachedFiles.length > 1 ? "s" : ""} anexado${attachedFiles.length > 1 ? "s" : ""}: ${attachedFiles.join(", ")}`}</span></button></div></div>}
+    {step === 3 && <div className="wizard-step"><p className="kicker">PASSO 3 DE 4</p><h2>Aprovação e prioridade</h2><p>A regra sugerida usa o valor, centro de custo e tipo de pedido.</p><div className="approval-card"><span><ShieldCheck /></span><div><small>ROTA RECOMENDADA</small><strong>Solicitante → Director de Operações → Finanças</strong><p>O Muntu valida o dossier antes de iniciar a aprovação. Valor acima de AOA 50M requer dupla aprovação.</p></div></div><div className="form-grid"><label className="form-field span-2">Aprovador principal<NativeSelect value={form.approver} onChange={(event) => update("approver", event.target.value)} className="field-control">{approvers.length === 0 ? <NativeSelectOption value="">Sem aprovadores disponíveis</NativeSelectOption> : approvers.map((approver) => <NativeSelectOption key={approver.id}>{`${approver.name} — ${approver.role}`}</NativeSelectOption>)}</NativeSelect></label><label className="form-field">Prioridade<NativeSelect value={form.priority} onChange={(event) => update("priority", event.target.value)} className="field-control"><NativeSelectOption>Normal</NativeSelectOption><NativeSelectOption>Média</NativeSelectOption><NativeSelectOption>Alta</NativeSelectOption></NativeSelect></label><label className="form-field">SLA inicial<Input value={form.priority === "Alta" ? "4 horas" : form.priority === "Média" ? "8 horas" : "16 horas"} readOnly /></label></div><div className="sla-note"><Clock3 /><span><strong>O relógio começa após a submissão.</strong> Pausas e devoluções ficam registadas na auditoria.</span></div></div>}
     {step === 4 && <div className="wizard-step"><p className="kicker">PASSO 4 DE 4</p><h2>Confirme e submeta</h2><p>O resumo será gravado no repositório e distribuído aos responsáveis.</p><div className="summary-grid"><div><span>Torre</span><strong>{form.tower}</strong></div><div><span>Transacção</span><strong>{form.type}</strong></div><div className="span-2"><span>Pedido</span><strong>{form.subject || "Novo pedido operacional"}</strong></div><div><span>Fornecedor</span><strong>{form.supplier}</strong></div><div><span>Valor</span><strong>{form.value ? `AOA ${form.value}` : "A confirmar"}</strong></div><div><span>Centro de custo</span><strong>{form.costCenter}</strong></div><div><span>Prioridade</span><strong>{form.priority}</strong></div><div className="span-2"><span>Aprovador</span><strong>{form.approver}</strong></div></div><div className="confirmation-note"><CheckCircle2 /><div><strong>Pronto para iniciar</strong><p>A equipa Muntu receberá o pedido, validará os dados e actualizará o SLA em tempo real.</p></div></div></div>}
   </div><div className="wizard-footer"><Button variant="outline" onClick={() => step > 1 ? setStep(step - 1) : window.history.back()}>{step > 1 ? "Voltar" : "Cancelar"}</Button>{step < 4 ? <Button className="btn-burgundy" onClick={() => setStep(step + 1)} disabled={step === 2 && !form.subject}>Continuar <ArrowRight /></Button> : <Button className="btn-burgundy" onClick={submit}>Submeter pedido <CheckCircle2 /></Button>}</div></section></>;
 }
@@ -727,16 +807,48 @@ function PurchaseOrders({ purchaseOrders }: { purchaseOrders: PurchaseOrder[] })
 
 function Receipts({ receipts, onConfirm }: { receipts: Receipt[]; onConfirm: (id: number) => void }) { return <><PageHeader kicker="GOODS & SERVICE RECEIPT" title="Recepções" description="Confirme quantidade, qualidade, evidência e data para desbloquear a factura." /><div className="receipt-grid">{receipts.map((item) => <article className="receipt-card" key={item.id}><div><span className="receipt-icon"><PackageCheck /></span><span className={statusClass(item.status)}>{item.status}</span></div><small>{item.po}</small><h2>{item.description}</h2><p>{item.supplier}</p><strong>{money(item.value)}</strong><div className="receipt-progress"><Progress value={item.progress} /><span>{item.progress}% entregue</span></div><Button className={item.progress === 100 && item.status !== "Confirmada" ? "btn-burgundy" : ""} variant={item.progress === 100 && item.status !== "Confirmada" ? "default" : "outline"} disabled={item.status === "Confirmada"} onClick={() => item.progress === 100 ? onConfirm(item.id) : toast.info("Evidência aberta")}>{item.status === "Confirmada" ? "Recepção confirmada" : item.progress === 100 ? "Confirmar recepção" : "Ver evidência"}</Button></article>)}</div></>; }
 
-function Invoices({ search, invoices }: { search: string; invoices: Invoice[] }) { const list = invoices.filter((invoice) => [invoice.id, invoice.supplier, invoice.po, invoice.status].some((item) => item.toLowerCase().includes(search.toLowerCase()))); const touchless = invoices.length ? Math.round((invoices.filter((item) => item.match === "3-way match").length / invoices.length) * 100) : 0; return <><PageHeader kicker="ACCOUNTS PAYABLE" title="Facturas & match" description="Recepção digital, validação fiscal, 2/3-way match e fila de excepções." action={<Button className="btn-burgundy" onClick={() => toast.success("Factura de demonstração carregada")}><UploadCloud /> Carregar factura</Button>} /><section className="match-summary"><article><FileCheck2 /><div><strong>{touchless}%</strong><span>Touchless match</span></div></article><article><Clock3 /><div><strong>1,8 dias</strong><span>Ciclo médio</span></div></article><article><AlertTriangle /><div><strong>{invoices.filter((item) => item.status === "Excepção").length}</strong><span>Excepções abertas</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Fornecedor</TableHead><TableHead>PO</TableHead><TableHead>Valor</TableHead><TableHead>Match</TableHead><TableHead>Estado</TableHead><TableHead>Vencimento</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((invoice) => <TableRow key={invoice.id}><TableCell><strong>{invoice.id}</strong></TableCell><TableCell>{invoice.supplier}</TableCell><TableCell>{invoice.po}</TableCell><TableCell>{money(invoice.value)}</TableCell><TableCell>{invoice.match}</TableCell><TableCell><span className={statusClass(invoice.status)}>{invoice.status}</span></TableCell><TableCell>{invoice.due}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`Imagem e match de ${invoice.id}`)}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section></>; }
+function Invoices({ search, invoices, onUploadDocument }: { search: string; invoices: Invoice[]; onUploadDocument: (file: File, options?: { type?: string; request?: string }) => void }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const list = invoices.filter((invoice) => [invoice.id, invoice.supplier, invoice.po, invoice.status].some((item) => item.toLowerCase().includes(search.toLowerCase())));
+  const touchless = invoices.length ? Math.round((invoices.filter((item) => item.match === "3-way match").length / invoices.length) * 100) : 0;
+  return <><PageHeader kicker="ACCOUNTS PAYABLE" title="Facturas & match" description="Recepção digital, validação fiscal, 2/3-way match e fila de excepções." action={<><input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadDocument(file, { type: "Factura" }); event.target.value = ""; }} /><Button className="btn-burgundy" onClick={() => fileInputRef.current?.click()}><UploadCloud /> Carregar factura</Button></>} /><section className="match-summary"><article><FileCheck2 /><div><strong>{touchless}%</strong><span>Touchless match</span></div></article><article><AlertTriangle /><div><strong>{invoices.filter((item) => item.status === "Excepção").length}</strong><span>Excepções abertas</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Fornecedor</TableHead><TableHead>PO</TableHead><TableHead>Valor</TableHead><TableHead>Match</TableHead><TableHead>Estado</TableHead><TableHead>Vencimento</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((invoice) => <TableRow key={invoice.id}><TableCell><strong>{invoice.id}</strong></TableCell><TableCell>{invoice.supplier}</TableCell><TableCell>{invoice.po}</TableCell><TableCell>{money(invoice.value)}</TableCell><TableCell>{invoice.match}</TableCell><TableCell><span className={statusClass(invoice.status)}>{invoice.status}</span></TableCell><TableCell>{invoice.due}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => toast.info(`Imagem e match de ${invoice.id}`)}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section></>;
+}
 
-function Exceptions({ items, onResolve }: { items: ExceptionItem[]; onResolve: (id: string) => void }) { return <><PageHeader kicker="RESOLUÇÃO HUMANA" title="Excepções" description="A tecnologia identifica. O Muntu coordena pessoas, evidência e decisão até ao encerramento." /><div className="exception-list">{items.map((item) => <article key={item.id} className={item.resolved ? "resolved" : ""}><span className="exception-severity"><AlertTriangle /></span><div className="exception-copy"><small>{item.id} • {item.ref}</small><h2>{item.title}</h2><p>Responsável: <strong>{item.owner}</strong> • Idade: <strong>{item.age}</strong> • Impacto: <strong>{item.impact}</strong></p></div><div className="exception-actions">{item.resolved ? <span className="resolved-label"><CheckCircle2 /> Resolvida</span> : <><Button variant="outline" onClick={() => toast.info(`Dossier ${item.id} aberto`)}><Eye /> Evidência</Button><Button className="btn-burgundy" onClick={() => onResolve(item.id)}>Resolver <ArrowRight /></Button></>}</div></article>)}{items.length === 0 && <div className="empty-state panel"><CheckCircle2 /><h3>Sem excepções</h3><p>Não existem excepções registadas.</p></div>}</div></>; }
+function Exceptions({ items, onResolve }: { items: ExceptionItem[]; onResolve: (id: string) => void }) { return <><PageHeader kicker="RESOLUÇÃO HUMANA" title="Excepções" description="A tecnologia identifica. O Muntu coordena pessoas, evidência e decisão até ao encerramento." /><div className="exception-list">{items.map((item) => <article key={item.id} className={item.resolved ? "resolved" : ""}><span className="exception-severity"><AlertTriangle /></span><div className="exception-copy"><small>{item.id} • {item.ref}</small><h2>{item.title}</h2><p>Responsável: <strong>{item.owner}</strong> • Causa: <strong>{item.cause}</strong> • Idade: <strong>{formatElapsedPt(item.createdAt)}</strong> • Impacto: <strong>{item.impact}</strong></p></div><div className="exception-actions">{item.resolved ? <span className="resolved-label"><CheckCircle2 /> Resolvida</span> : <><Button variant="outline" onClick={() => toast.info(`Dossier ${item.id} aberto`)}><Eye /> Evidência</Button><Button className="btn-burgundy" onClick={() => onResolve(item.id)}>Resolver <ArrowRight /></Button></>}</div></article>)}{items.length === 0 && <div className="empty-state panel"><CheckCircle2 /><h3>Sem excepções</h3><p>Não existem excepções registadas.</p></div>}</div></>; }
 
-function Payments({ batches, onRelease }: { batches: PaymentBatch[]; onRelease: (id: string) => void }) { return <><PageHeader kicker="PAYMENT READINESS" title="Pagamentos" description="O Muntu prepara o lote, controla a evidência e o cliente mantém a libertação bancária." /><section className="payment-banner"><div><ShieldCheck /><span><strong>Segregação de funções preservada.</strong> Muntu prepara e recomenda; Finanças valida e liberta no banco.</span></div><Badge>0 RISCO DE CRÉDITO</Badge></section><div className="payment-grid">{batches.map((batch) => { const isReleased = batch.released || batch.status === "Pago"; return <article key={batch.id}><div><span className="payment-icon"><WalletCards /></span><span className={statusClass(isReleased ? "Pago" : "Aprovação")}>{isReleased ? "Pago" : "Pronto para libertar"}</span></div><small>{batch.id}</small><h2>{money(batch.value)}</h2><p>{batch.count} facturas • Data proposta: {batch.date}</p><div className="payment-checks"><span><CheckCircle2 /> Match concluído</span><span><CheckCircle2 /> Aprovações completas</span><span><CheckCircle2 /> Dados bancários verificados</span></div><Button className={isReleased ? "" : "btn-burgundy"} variant={isReleased ? "outline" : "default"} disabled={isReleased} onClick={() => onRelease(batch.id)}>{isReleased ? "Comprovativo disponível" : "Libertar para o banco"}</Button></article>; })}</div></>; }
+function Payments({ batches, onRelease }: { batches: PaymentBatch[]; onRelease: (id: string) => void }) { return <><PageHeader kicker="PAYMENT READINESS" title="Pagamentos" description="O Muntu prepara o lote, controla a evidência e o cliente mantém a libertação bancária." /><section className="payment-banner"><div><ShieldCheck /><span><strong>Segregação de funções preservada.</strong> Muntu prepara e recomenda; Finanças valida e liberta no banco.</span></div><Badge>0 RISCO DE CRÉDITO</Badge></section><div className="payment-grid">{batches.map((batch) => { const isReleased = batch.released || batch.status === "Pago"; return <article key={batch.id}><div><span className="payment-icon"><WalletCards /></span><span className={statusClass(isReleased ? "Pago" : "Aprovação")}>{isReleased ? "Pago" : "Pronto para libertar"}</span></div><small>{batch.id}</small><h2>{money(batch.value)}</h2><p>{batch.count} facturas • Data proposta: {batch.date}</p><div className="payment-checks">{isReleased ? <><span><CheckCircle2 /> Match concluído</span><span><CheckCircle2 /> Aprovações completas</span><span><CheckCircle2 /> Dados bancários verificados</span></> : <span className="muted"><Clock3 /> Aguarda validação e libertação bancária</span>}</div><Button className={isReleased ? "" : "btn-burgundy"} variant={isReleased ? "outline" : "default"} disabled={isReleased} onClick={() => onRelease(batch.id)}>{isReleased ? "Comprovativo disponível" : "Libertar para o banco"}</Button></article>; })}</div></>; }
 
-function Reports({ requests, exceptions }: { requests: RequestItem[]; exceptions: ExceptionItem[] }) {
-  const months = [{ month: "Mar", requests: 62, sla: 88 }, { month: "Abr", requests: 74, sla: 91 }, { month: "Mai", requests: 69, sla: 93 }, { month: "Jun", requests: 81, sla: 94 }, { month: "Jul", requests: 92, sla: 95 }, { month: "Ago", requests: requests.length || 86, sla: 96 }];
+function Reports({ requests, exceptions, invoices, purchaseOrders, suppliers }: { requests: RequestItem[]; exceptions: ExceptionItem[]; invoices: Invoice[]; purchaseOrders: PurchaseOrder[]; suppliers: Supplier[] }) {
   const openExceptions = exceptions.filter((item) => !item.resolved).length;
-  return <><PageHeader kicker="CONTROL TOWER ANALYTICS" title="Relatórios" description="Performance operacional, spend, conteúdo local, risco e oportunidades de melhoria." action={<div className="header-actions"><NativeSelect defaultValue="Agosto 2026"><NativeSelectOption>Agosto 2026</NativeSelectOption><NativeSelectOption>Julho 2026</NativeSelectOption><NativeSelectOption>Q2 2026</NativeSelectOption></NativeSelect><Button variant="outline"><Download /> PDF</Button></div>} /><section className="metric-grid report-metrics"><article><div><small>CICLO REQ-TO-PO</small><strong>2,4d</strong><p><b>−18%</b> vs. baseline</p></div></article><article><div><small>TOUCHLESS INVOICE</small><strong>87%</strong><p><b>+9 pp</b> no trimestre</p></div></article><article><div><small>SPEND LOCAL</small><strong>82%</strong><p>AOA 1,24 mil M</p></div></article><article><div><small>EXCEPÇÕES ABERTAS</small><strong>{openExceptions}</strong><p>Fila activa</p></div></article></section><section className="reports-grid"><article className="panel"><div className="panel-heading"><div><p>TENDÊNCIA</p><h2>Volume e SLA</h2></div><Badge className="badge-positive">Meta atingida</Badge></div><div className="bar-chart">{months.map((item) => <div key={item.month}><span className="bar-value">{item.requests}</span><div className="bar" style={{ height: `${item.requests * 2.4}px` }}><i style={{ height: `${item.sla}%` }} /></div><strong>{item.month}</strong></div>)}</div><div className="chart-legend"><span><i className="legend-burgundy" /> Pedidos</span><span><i className="legend-gold" /> SLA %</span></div></article><article className="panel"><div className="panel-heading"><div><p>DRIVERS</p><h2>Excepções por causa</h2></div></div><div className="cause-list">{[["Recepção em falta", 34], ["Preço divergente", 26], ["Dados fiscais", 18], ["Quantidade", 13], ["Outros", 9]].map(([label, value]) => <div key={label as string}><span>{label}</span><Progress value={value as number} /><strong>{value}%</strong></div>)}</div><div className="insight-box"><Sparkles /><span><strong>Insight Muntu</strong>Confirmar recepções no telemóvel pode eliminar 34% das excepções actuais.</span></div></article></section></>;
+  // Ciclo de decisão e tendência mensal: única fonte real (ver
+  // lib/requests-sla.ts), substitui o array de 6 meses fixo no código
+  // (5 deles inventados) que existia aqui antes.
+  const avgCycleDays = computeAvgCycleDays(requests);
+  const decidedCount = requests.filter((item) => item.decidedAt).length;
+  const months = bucketRequestsByMonth(requests);
+  // Mesma fórmula já usada (e correcta) em Invoices — antes duplicada
+  // aqui como um "87%" fixo, dessincronizado da real.
+  const touchless = invoices.length ? Math.round((invoices.filter((item) => item.match === "3-way match").length / invoices.length) * 100) : 0;
+
+  // Spend local real: conteúdo local de cada fornecedor (suppliers.local)
+  // ponderado pelo valor das POs efectivamente emitidas — substitui o
+  // "82% / AOA 1,24 mil M" fixo no código, sem nenhuma base nos dados.
+  const localPctByName = new Map(suppliers.map((s) => [s.name, Number(String(s.local).replace(/\D/g, "")) || 0]));
+  const totalSpend = purchaseOrders.reduce((sum, po) => sum + po.value, 0);
+  const localSpend = purchaseOrders.reduce((sum, po) => sum + (po.value * (localPctByName.get(po.supplier) ?? 0)) / 100, 0);
+  const spendLocalPct = totalSpend ? Math.round((localSpend / totalSpend) * 100) : 0;
+
+  // Excepções por causa: agregação real de exceptions.cause — substitui a
+  // lista de percentagens fixa no código (schema não tinha sequer coluna
+  // de causa antes).
+  const causeCounts = new Map<string, number>();
+  exceptions.forEach((item) => causeCounts.set(item.cause, (causeCounts.get(item.cause) ?? 0) + 1));
+  const causeBreakdown = [...causeCounts.entries()]
+    .map(([label, count]): [string, number] => [label, exceptions.length ? Math.round((count / exceptions.length) * 100) : 0])
+    .sort((a, b) => b[1] - a[1]);
+  const topCause = causeBreakdown[0];
+
+  return <><PageHeader kicker="CONTROL TOWER ANALYTICS" title="Relatórios" description="Performance operacional, spend, conteúdo local, risco e oportunidades de melhoria." /><section className="metric-grid report-metrics"><article><div><small>CICLO DE DECISÃO</small><strong>{avgCycleDays ? `${avgCycleDays.toString().replace(".", ",")}d` : "—"}</strong><p>{decidedCount} pedidos decididos</p></div></article><article><div><small>TOUCHLESS INVOICE</small><strong>{touchless}%</strong><p>{invoices.length} facturas</p></div></article><article><div><small>SPEND LOCAL</small><strong>{spendLocalPct}%</strong><p>{money(totalSpend)} em POs</p></div></article><article><div><small>EXCEPÇÕES ABERTAS</small><strong>{openExceptions}</strong><p>Fila activa</p></div></article></section><section className="reports-grid"><article className="panel"><div className="panel-heading"><div><p>TENDÊNCIA</p><h2>Volume e SLA</h2></div></div><div className="bar-chart">{months.map((item) => <div key={item.label}><span className="bar-value">{item.count}</span><div className="bar" style={{ height: `${Math.max(item.count * 2.4, 4)}px` }}><i style={{ height: `${item.slaPct}%` }} /></div><strong>{item.label}</strong></div>)}</div><div className="chart-legend"><span><i className="legend-burgundy" /> Pedidos</span><span><i className="legend-gold" /> SLA %</span></div></article><article className="panel"><div className="panel-heading"><div><p>DRIVERS</p><h2>Excepções por causa</h2></div></div><div className="cause-list">{causeBreakdown.length === 0 ? <p className="muted">Sem excepções registadas.</p> : causeBreakdown.map(([label, value]) => <div key={label}><span>{label}</span><Progress value={value} /><strong>{value}%</strong></div>)}</div>{topCause && <div className="insight-box"><Sparkles /><span><strong>Insight Muntu</strong>{`"${topCause[0]}" é a causa mais comum das excepções, representando ${topCause[1]}% dos casos registados.`}</span></div>}</article></section></>;
 }
 
 function Repository({ search, documents, onUpload, onDownload }: { search: string; documents: DocumentItem[]; onUpload: (file: File) => void; onDownload: (doc: DocumentItem) => void }) {
@@ -1295,6 +1407,27 @@ export default function HomePage() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [ssoError, setSsoError] = useState<string | undefined>(undefined);
   const [resetToken, setResetToken] = useState<string | undefined>(undefined);
+  const [publicStats, setPublicStats] = useState<PublicStats>(null);
+
+  // Estatísticas reais para o site público e o login (antes do
+  // utilizador iniciar sessão) — substitui os "96,4% SLA / 42 pedidos
+  // activos / 3,2 dias" fixos no código que apareciam nestes dois ecrãs.
+  // Falha silenciosa (fica null, os componentes mostram "—"): não vale a
+  // pena um erro visível por causa de um número decorativo.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/public-stats");
+        if (!response.ok) return;
+        const data = (await response.json()) as PublicStats;
+        if (!cancelled) setPublicStats(data);
+      } catch {
+        // silencioso — ver comentário acima
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // "admin-login" nunca fica registado no hash da URL — só se chega lá
   // pelo gesto secreto no símbolo (4 cliques), nunca por um link directo
@@ -1356,7 +1489,7 @@ export default function HomePage() {
     return <div className="empty-state panel"><Sparkles /><h3>A carregar…</h3></div>;
   }
   if (screen === "login" || (screen === "portal" && !user)) {
-    return <><Toaster richColors position="top-right" /><Login onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} initialError={ssoError} resetToken={resetToken} onResetTokenConsumed={() => setResetToken(undefined)} /></>;
+    return <><Toaster richColors position="top-right" /><Login onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} initialError={ssoError} resetToken={resetToken} onResetTokenConsumed={() => setResetToken(undefined)} publicStats={publicStats} /></>;
   }
   if (screen === "admin-login") {
     return <><Toaster richColors position="top-right" /><AdminLogin onBack={() => navigate("public")} onSuccess={(loggedUser) => { setUser(loggedUser); navigate("portal"); }} /></>;
@@ -1364,5 +1497,5 @@ export default function HomePage() {
   if (screen === "portal" && user) {
     return <Portal user={user} onLogout={logout} />;
   }
-  return <PublicSite onLogin={() => navigate("login")} onSecretAdminLogin={() => navigate("admin-login")} />;
+  return <PublicSite onLogin={() => navigate("login")} onSecretAdminLogin={() => navigate("admin-login")} publicStats={publicStats} />;
 }

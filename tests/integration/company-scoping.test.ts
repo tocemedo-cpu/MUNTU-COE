@@ -26,11 +26,11 @@ async function setUpTwoCompanies() {
 
   const [exceptionA] = await db
     .insert(exceptions)
-    .values({ id: `EXC-TEST-A-${companyA.id}`, title: "Excepção A", ref: "ref-a", owner: "x", age: "1h", impact: "0", companyId: companyA.id })
+    .values({ id: `EXC-TEST-A-${companyA.id}`, title: "Excepção A", ref: "ref-a", owner: "x", impact: "0", companyId: companyA.id })
     .returning();
   const [exceptionB] = await db
     .insert(exceptions)
-    .values({ id: `EXC-TEST-B-${companyB.id}`, title: "Excepção B", ref: "ref-b", owner: "x", age: "1h", impact: "0", companyId: companyB.id })
+    .values({ id: `EXC-TEST-B-${companyB.id}`, title: "Excepção B", ref: "ref-b", owner: "x", impact: "0", companyId: companyB.id })
     .returning();
 
   const [paymentA] = await db

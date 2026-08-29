@@ -2,7 +2,14 @@ import { and, eq, like, or, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests, users } from "@/db/schema";
 import { getSession } from "@/lib/authz";
+import { computeRequestSlaDueAt } from "@/lib/requests-sla";
 import { parseJsonBody, requestCreateSchema } from "@/lib/validation";
+
+function formatSubmittedLabel(date: Date): string {
+  return new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })
+    .format(date)
+    .replace(".", "");
+}
 
 export async function GET(request: Request) {
   const db = getDb();
@@ -46,31 +53,51 @@ export async function POST(request: Request) {
   const session = getSession(request);
   const [currentUser] = await db.select().from(users).where(eq(users.id, session.userId));
 
-  const total = (await db.select().from(requests)).length;
-  const id = `REQ-2026-${String(815 + total).padStart(4, "0")}`;
+  const priority = payload.priority ?? "Média";
+  const sla = priority === "Alta" ? "4 horas" : priority === "Média" ? "8 horas" : "16 horas";
+  const now = new Date();
+  const slaDueAt = computeRequestSlaDueAt(priority, now);
 
-  const sla = payload.priority === "Alta" ? "4 horas" : payload.priority === "Média" ? "8 horas" : "16 horas";
+  const values = {
+    subject: payload.subject?.trim() || "Novo pedido operacional",
+    tower: payload.tower ?? "Requisition-to-PO",
+    type: payload.type?.trim() || "PO standard",
+    value: Number(String(payload.value ?? "").replace(/\D/g, "")) || 0,
+    status: "Validação",
+    priority,
+    owner: currentUser?.name ?? "Desconhecido",
+    ownerUserId: session.userId,
+    companyId: session.companyId,
+    sla,
+    slaDueAt,
+    stage: 1,
+    submitted: formatSubmittedLabel(now),
+    supplier: payload.supplier ?? "",
+    costCenter: payload.costCenter ?? "",
+  };
 
-  const [created] = await db
-    .insert(requests)
-    .values({
-      id,
-      subject: payload.subject?.trim() || "Novo pedido operacional",
-      tower: payload.tower ?? "Requisition-to-PO",
-      type: payload.type?.trim() || "PO standard",
-      value: Number(String(payload.value ?? "").replace(/\D/g, "")) || 0,
-      status: "Validação",
-      priority: payload.priority ?? "Média",
-      owner: currentUser?.name ?? "Desconhecido",
-      ownerUserId: session.userId,
-      companyId: session.companyId,
-      sla,
-      stage: 1,
-      submitted: "Agora",
-      supplier: payload.supplier ?? "",
-      costCenter: payload.costCenter ?? "",
-    })
-    .returning();
+  const created = await insertRequestWithGeneratedId(db, values);
 
   return Response.json({ request: created }, { status: 201 });
+}
+
+type NewRequestValues = Omit<typeof requests.$inferInsert, "id">;
+
+// Um id baseado em COUNT(*) colide assim que a tabela tem qualquer linha
+// fora dessa sequência (dados semeados, pedidos de outra origem) — mesma
+// classe de bug já corrigida para POs e pedidos de suporte. Sorteia um id
+// fora do intervalo usado pelos dados de demonstração (0800-0899) e volta
+// a tentar no caso raro de colisão real.
+async function insertRequestWithGeneratedId(db: ReturnType<typeof getDb>, values: NewRequestValues) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const id = `REQ-2026-${1000 + Math.floor(Math.random() * 9000)}`;
+    try {
+      const [created] = await db.insert(requests).values({ id, ...values }).returning();
+      return created;
+    } catch (error) {
+      const isUniqueViolation = (error as { code?: string } | undefined)?.code === "23505";
+      if (!isUniqueViolation || attempt === 4) throw error;
+    }
+  }
+  throw new Error("Não foi possível gerar um id de pedido único");
 }

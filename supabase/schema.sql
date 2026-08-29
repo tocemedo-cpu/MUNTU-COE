@@ -66,6 +66,12 @@ alter table public.requests add column if not exists company_id bigint reference
 -- Tipo de transacção do wizard — determina o tier de facturação da PO
 -- gerada na aprovação (ver lib/billing.ts).
 alter table public.requests add column if not exists type text not null default 'PO standard';
+-- Prazo real de decisão (calculado a partir da prioridade na criação) e
+-- momento em que foi de facto aprovado/rejeitado — única fonte real de
+-- "SLA no prazo %" e "ciclo médio", em vez dos números fixos no código
+-- que existiam no frontend antes (ver lib/requests-sla.ts).
+alter table public.requests add column if not exists sla_due_at timestamptz;
+alter table public.requests add column if not exists decided_at timestamptz;
 
 create table if not exists public.suppliers (
   id bigint generated always as identity primary key,
@@ -142,6 +148,15 @@ create table if not exists public.exceptions (
 -- Mesma razão que em receipts: sem isto, `company_admin` recebia excepções
 -- de todas as empresas via a API.
 alter table public.exceptions add column if not exists company_id bigint references public.companies (id);
+
+-- `age` era um texto fixo ("2h 14m") gravado uma vez e nunca mais
+-- actualizado — substituído por `created_at` real, com a idade calculada
+-- no frontend a cada render (formatElapsedPt em app/page.tsx). `cause`
+-- alimenta a agregação real "Excepções por causa" em Relatórios, em vez
+-- da lista de percentagens fixa no código que existia antes.
+alter table public.exceptions add column if not exists created_at timestamptz not null default now();
+alter table public.exceptions add column if not exists cause text not null default 'Outros';
+alter table public.exceptions drop column if exists age;
 
 create table if not exists public.payment_batches (
   id text primary key,
@@ -373,12 +388,18 @@ update public.users
 set password = crypt(password, gen_salt('bf', 10))
 where password is not null and password !~ '^\$2[aby]\$';
 
-insert into public.requests (id, subject, tower, type, value, status, priority, owner, sla, stage, submitted, supplier, cost_center) values
-  ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 'PO standard', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210'),
-  ('REQ-2026-0813', 'Inspecção NDT offshore', 'Serviços técnicos', 'Compra urgente', 31600000, 'Em execução', 'Alta', 'Marta Miguel', '18h 40m', 3, '25 Ago, 15:42', 'Atlântico Integrity', 'INT-B15-105'),
-  ('REQ-2026-0812', 'Calibração de PRV — campanha Q3', 'PO-to-Receipt', 'PO standard', 12450000, 'Receção', 'Média', 'Domingos José', '1d 04h', 4, '24 Ago, 11:20', 'Luanda Calibration Services', 'MAI-PRV-330'),
-  ('REQ-2026-0809', 'Consumíveis de manutenção', 'Invoice-to-Pay', 'PO catalogado', 5980000, 'Excepção', 'Média', 'Ana Manuel', 'Vencido 2h', 6, '22 Ago, 08:05', 'Mwangolé Supplies', 'MRO-BASE-090'),
-  ('REQ-2026-0804', 'Transporte de equipa para Soyo', 'Invoice-to-Pay', 'PO standard', 3200000, 'Pago', 'Normal', 'Ana Manuel', 'Concluído', 7, '19 Ago, 13:37', 'Norte Logística', 'LOG-SOY-011')
+-- sla_due_at calculado a partir da prioridade (Alta=4h, Média=8h,
+-- Normal=16h — mesmas regras de lib/requests-sla.ts); decided_at só
+-- preenchido para os que já saíram de "Aprovação". REQ-2026-0809 fica
+-- deliberadamente com o prazo já vencido (mesmo espírito do "Vencido 2h"
+-- que já tinha no texto de sla), para o relatório mostrar um incumprimento
+-- real em vez de só casos dentro do prazo.
+insert into public.requests (id, subject, tower, type, value, status, priority, owner, sla, stage, submitted, supplier, cost_center, sla_due_at, decided_at) values
+  ('REQ-2026-0814', 'Válvulas de controlo — Kizomba B', 'Requisition-to-PO', 'PO standard', 84000000, 'Aprovação', 'Alta', 'Carlos Mateus', '03h 12m', 2, '26 Ago, 09:14', 'Kwanza Industrial', 'OFS-OPS-210', now() + interval '4 hours', null),
+  ('REQ-2026-0813', 'Inspecção NDT offshore', 'Serviços técnicos', 'Compra urgente', 31600000, 'Em execução', 'Alta', 'Marta Miguel', '18h 40m', 3, '25 Ago, 15:42', 'Atlântico Integrity', 'INT-B15-105', now() + interval '4 hours', now()),
+  ('REQ-2026-0812', 'Calibração de PRV — campanha Q3', 'PO-to-Receipt', 'PO standard', 12450000, 'Receção', 'Média', 'Domingos José', '1d 04h', 4, '24 Ago, 11:20', 'Luanda Calibration Services', 'MAI-PRV-330', now() + interval '8 hours', now()),
+  ('REQ-2026-0809', 'Consumíveis de manutenção', 'Invoice-to-Pay', 'PO catalogado', 5980000, 'Excepção', 'Média', 'Ana Manuel', 'Vencido 2h', 6, '22 Ago, 08:05', 'Mwangolé Supplies', 'MRO-BASE-090', now() - interval '1 hour', now()),
+  ('REQ-2026-0804', 'Transporte de equipa para Soyo', 'Invoice-to-Pay', 'PO standard', 3200000, 'Pago', 'Normal', 'Ana Manuel', 'Concluído', 7, '19 Ago, 13:37', 'Norte Logística', 'LOG-SOY-011', now() + interval '16 hours', now())
 on conflict (id) do nothing;
 
 -- Backfill: liga os pedidos de demonstração à empresa e, quando o dono
@@ -475,10 +496,12 @@ insert into public.billing_rates (key, label, amount) values
   ('invoice_excecao', 'Factura com excepção/disputa', 11500)
 on conflict (key) do nothing;
 
-insert into public.exceptions (id, title, ref, owner, age, impact) values
-  ('EXC-0264', 'Preço da factura diverge do PO em 4,8%', 'FT-2026-1192 • PO-6100411', 'Comprador', '2h 14m', 'AOA 286 000'),
-  ('EXC-0261', 'Recepção de serviço não registada', 'FT-2026-1179 • PO-6100380', 'Requisitante', '7h 38m', 'AOA 12 450 000'),
-  ('EXC-0258', 'Certificado fiscal expirado', 'Supplier Passport • Mwangolé Supplies', 'Fornecedor', '1d 03h', 'Bloqueio de pagamento')
+insert into public.exceptions (id, title, ref, owner, cause, impact, created_at, resolved) values
+  ('EXC-0264', 'Preço da factura diverge do PO em 4,8%', 'FT-2026-1192 • PO-6100411', 'Comprador', 'Preço divergente', 'AOA 286 000', now() - interval '2 hours 14 minutes', false),
+  ('EXC-0261', 'Recepção de serviço não registada', 'FT-2026-1179 • PO-6100380', 'Requisitante', 'Recepção em falta', 'AOA 12 450 000', now() - interval '7 hours 38 minutes', false),
+  ('EXC-0258', 'Certificado fiscal expirado', 'Supplier Passport • Mwangolé Supplies', 'Fornecedor', 'Dados fiscais', 'Bloqueio de pagamento', now() - interval '27 hours', false),
+  ('EXC-0270', 'Quantidade recebida inferior à da PO — lote 2', 'PO-6100432', 'Comprador', 'Quantidade', 'AOA 4 200 000', now() - interval '5 hours', false),
+  ('EXC-0245', 'Justificativo em falta para despesa adicional', 'REQ-2026-0809', 'Requisitante', 'Outros', 'AOA 850 000', now() - interval '4 days', true)
 on conflict (id) do nothing;
 
 insert into public.payment_batches (id, date, count, value, status, released) values

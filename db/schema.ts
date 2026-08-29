@@ -61,6 +61,15 @@ export const requests = pgTable("requests", {
   costCenter: text("cost_center").notNull(),
   notes: text("notes").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  // Prazo real de decisão (aprovar/rejeitar), calculado a partir da
+  // prioridade no momento da criação — ver lib/requests-sla.ts. Substitui
+  // os vários números de "SLA %"/"ciclo médio" fixos no código que
+  // existiam espalhados pelo frontend (login, dashboard, relatórios):
+  // agora há uma só fonte real, calculada a partir destes dois campos.
+  slaDueAt: timestamp("sla_due_at", { withTimezone: true }),
+  // Preenchido quando o pedido é aprovado ou rejeitado (app/api/requests/
+  // [id]/route.ts). Nulo enquanto o pedido aguarda decisão.
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
 });
 
 export const suppliers = pgTable("suppliers", {
@@ -121,10 +130,19 @@ export const exceptions = pgTable("exceptions", {
   title: text("title").notNull(),
   ref: text("ref").notNull(),
   owner: text("owner").notNull(),
-  age: text("age").notNull(),
+  // Causa-raiz para o relatório "Excepções por causa" (lib/requests-sla.ts
+  // não toca nisto — é agregado directamente pelo frontend a partir da
+  // lista já carregada). Texto livre, não um enum: a lista de causas reais
+  // cresce com o que a operação encontra, não é fixa à partida.
+  cause: text("cause").notNull().default("Outros"),
   impact: text("impact").notNull(),
   resolved: boolean("resolved").notNull().default(false),
   companyId: bigint("company_id", { mode: "number" }).references(() => companies.id),
+  // Substitui a antiga coluna "age" (texto fixo tipo "2h 14m", nunca
+  // actualizado). A idade real é agora calculada no frontend a partir
+  // deste timestamp em cada render, em vez de ficar gravada e a envelhecer
+  // mal (formatElapsedPt em app/page.tsx).
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
 });
 
 export const paymentBatches = pgTable("payment_batches", {

@@ -139,4 +139,21 @@ describe("PATCH /api/requests/:id (approve/reject)", () => {
     const linkedPos = await db.select().from(purchaseOrders).where(eq(purchaseOrders.requestId, request.id));
     expect(linkedPos).toHaveLength(0);
   });
+
+  it("stamps decidedAt on both approve and reject, real SLA/cycle-time data instead of the old fixed dashboard numbers", async () => {
+    const { company, request } = await makeCompanyAndRequest("PO standard", "6");
+    expect(request.decidedAt).toBeNull();
+
+    const response = await patchRequest(
+      jsonRequest(`http://localhost/api/requests/${request.id}`, {
+        method: "PATCH",
+        session: { userId: 1, accessLevel: "company_admin", companyId: company.id },
+        body: { action: "approve" },
+      }),
+      { params: Promise.resolve({ id: request.id }) }
+    );
+    const body = await response.json();
+    expect(body.request.decidedAt).toBeTruthy();
+    expect(new Date(body.request.decidedAt).getTime()).toBeGreaterThanOrEqual(new Date(request.createdAt).getTime());
+  });
 });

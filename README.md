@@ -137,6 +137,21 @@ Qualquer utilizador autenticado (independentemente do `accessLevel`) pode abrir 
 
 Um utilizador normal só vê e responde aos seus próprios pedidos (403 para os de outra pessoa). O `system_admin` vê a caixa de entrada completa — com contagem de abertos e de pedidos com SLA vencido — pode responder a qualquer pedido (uma resposta do admin move automaticamente `aberto` → `em_curso`) e é o único que pode mudar estado, prioridade, categoria ou responsável. Fechar um pedido como `resolvido`/`fechado` regista `resolvedAt`; reabri-lo limpa esse campo. Tal como `users`/`billing_rates`/`document_files`, `support_tickets` e `support_messages` não têm política de `select` — ilegíveis pela API pública/anon key, só por rotas de servidor.
 
+## SLA%, ciclo médio e outros números reais (sem dados mockados)
+
+A versão inicial deste portal veio de um mockup estático: vários números no Dashboard, Relatórios, Login e site público (`96,4% SLA`, `3,2 dias`/`2,4 dias`/`1,8 dias` de ciclo — três valores diferentes para o mesmo conceito —, uma lista fixa de "excepções por causa", um gráfico de tendência com 5 de 6 meses inventados, 3 notificações sempre iguais para qualquer utilizador) ficaram por trás no código depois da app passar a ter dados reais nas restantes telas. Foram todos substituídos:
+
+- **SLA no prazo % e ciclo médio de decisão** — única fonte real (`lib/requests-sla.ts`), calculada a partir de `requests.sla_due_at` (prazo calculado da prioridade na criação: Alta 4h, Média 8h, Normal 16h) e `requests.decided_at` (preenchido quando o pedido é aprovado/rejeitado). O mesmo par de números aparece agora, sempre igual, no Dashboard, em Relatórios e no site público/login (via `/api/public-stats`, sem sessão).
+- **Tendência mensal em Relatórios** — agrupamento real de `requests` por mês de criação (`bucketRequestsByMonth`), em vez do array de 6 meses fixo no código.
+- **Excepções por causa** — `exceptions.cause` (nova coluna) agregada de verdade; a caixa "Insight Muntu" descreve a causa mais comum real, em vez de uma frase fixa.
+- **Spend local %** em Relatórios — conteúdo local de cada fornecedor (`suppliers.local`) ponderado pelo valor real das POs emitidas.
+- **Notificações** (sino no topo) — derivadas do que já está carregado (excepções abertas mais antigas, pedidos à espera de aprovação, recepções prontas), não uma lista fixa.
+- **Aprovador e fornecedor no wizard de novo pedido** — `/api/approvers` devolve `company_admin` da própria empresa + `coe_manager`/`system_admin`, em vez de 3 nomes fixos no código; o fornecedor por omissão é o primeiro fornecedor real, não sempre "Kwanza Industrial".
+- **Anexos no wizard e upload de factura** — chamam o upload real (`/api/documents`) já usado no Repositório, em vez de um toast "de demonstração" que não gravava nada.
+- **Idade das excepções** — calculada a cada render a partir de `exceptions.created_at` (`formatElapsedPt`), em vez de um texto tipo "2h 14m" gravado uma vez e nunca mais actualizado.
+
+Deliberadamente deixados de fora desta ronda (funcionalidade nova, não substituição de dado fixo por real): os botões "Ver" de Supplier Passport, linha temporal da PO, imagem/match de factura e dossier de excepção continuam a abrir só um toast — precisam de tabelas novas (histórico, imagens, anexos de evidência) que ainda não existem.
+
 ## Rotas de API
 
 | Rota | Métodos | Descrição |
@@ -176,8 +191,10 @@ Um utilizador normal só vê e responde aos seus próprios pedidos (403 para os 
 | `/api/support` | `GET`, `POST` | Pedidos de suporte — `GET` lista os próprios (todos para `system_admin`); `POST` abre um pedido com mensagem inicial |
 | `/api/support/:id` | `GET`, `PATCH` | Detalhe + fio de mensagens (dono ou `system_admin`); `PATCH` muda estado/prioridade/categoria/responsável (só `system_admin`) |
 | `/api/support/:id/messages` | `POST` | Responde num pedido (dono ou `system_admin`) — uma resposta do admin move automaticamente `aberto` → `em_curso` |
+| `/api/approvers` | `GET` | Aprovadores reais para o wizard de novo pedido — `company_admin` da própria empresa + todo o `coe_manager`/`system_admin` |
+| `/api/public-stats` | `GET` | Estatísticas agregadas e não sensíveis (sem sessão) para o site público e o login — activos, SLA%, ciclo médio |
 
-Todas as rotas excepto `/api/auth/login` e `/api/auth/logout` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
+Todas as rotas excepto `/api/auth/login`, `/api/auth/logout` e `/api/public-stats` exigem sessão válida — `middleware.ts` verifica o cookie `muntu_session` (assinado por HMAC) antes de qualquer rota executar e devolve `401` sem sessão.
 
 ## Deploy no Render
 

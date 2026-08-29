@@ -13,6 +13,9 @@ const PUBLIC_API_PATHS = new Set([
   // Autenticada por CRON_SECRET (header x-cron-secret), não por sessão —
   // é chamada por um agendador externo, não por um utilizador logado.
   "/api/admin/billing/generate-monthly",
+  // Estatísticas agregadas e não sensíveis para o site público e o login,
+  // mostradas antes de haver sessão nenhuma — ver app/api/public-stats.
+  "/api/public-stats",
 ]);
 
 // Bloqueio grosso por prefixo de rota — cobre o essencial da autorização

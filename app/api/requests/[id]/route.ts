@@ -38,6 +38,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       status: approve ? "Em execução" : "Rejeitado",
       stage: approve ? Math.max(existing.stage, 3) : existing.stage,
       sla: approve ? "Dentro do SLA" : "Encerrado",
+      decidedAt: new Date(),
     })
     .where(eq(requests.id, id))
     .returning();
