@@ -48,6 +48,11 @@ const ROUTE_ACCESS: { prefix: string; allow: AccessLevel[] }[] = [
   { prefix: "/api/invoices", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
   { prefix: "/api/exceptions", allow: ["company_admin", "analyst", "coe_manager", "system_admin"] },
   { prefix: "/api/payments", allow: ["company_admin", "analyst", "coe_manager", "system_admin"] },
+  // Equipa da própria empresa (convidar/listar colegas) — só o
+  // Administrador da empresa, nunca outro nível. O âmbito por empresa em
+  // si (nunca ver/convidar para outra empresa) é feito no handler a
+  // partir de session.companyId, não aqui.
+  { prefix: "/api/company", allow: ["company_admin"] },
   // /api/documents não tem entrada aqui de propósito: um requisitante ou
   // fornecedor precisa de conseguir aceder aos documentos ligados à sua
   // própria entidade (o seu pedido, o seu fornecedor). A autorização real

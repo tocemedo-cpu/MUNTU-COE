@@ -68,7 +68,7 @@ import { bucketRequestsByMonth, computeAvgCycleDays, computeSlaOnTimePct } from 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
   | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
-  | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications";
+  | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications" | "team";
 
 type RequestItem = {
   id: string;
@@ -651,17 +651,20 @@ const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   // Avaliar/homologar candidaturas (Candidatura -> ... -> Acesso Muntu) é
   // trabalho da equipa Muntu, não de uma empresa/fornecedor cliente.
   applications: ["coe_manager", "system_admin"],
+  // Convidar colegas para a própria empresa — só o Administrador da
+  // empresa, escopado à sua própria empresa (ver /api/company/users).
+  team: ["company_admin"],
 };
 
 const navigation: { group: string; items: { id: PortalView; label: string; icon: typeof Home; count?: number }[] }[] = [
-  { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }] },
+  { group: "TRABALHO", items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }, { id: "new-request", label: "Novo pedido", icon: Plus }, { id: "requests", label: "Meus pedidos", icon: Inbox }, { id: "approvals", label: "Aprovações", icon: ClipboardCheck }, { id: "team", label: "Equipa", icon: UserCog }] },
   { group: "HOMOLOGAÇÃO", items: [{ id: "applications", label: "Candidaturas", icon: Handshake }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
   { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
   { group: "SUPORTE", items: [{ id: "support", label: "Suporte", icon: LifeBuoy }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -935,6 +938,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "billing" && <ClientBilling />}
           {view === "support" && <Support user={user} />}
           {view === "applications" && <Applications applications={applicationsList} onApplicationUpdated={(updated) => setApplicationsList((items) => items.map((item) => (item.id === updated.id ? updated : item)))} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "team" && <Team />}
         </>}
       </main>
     </section>
@@ -1274,22 +1278,27 @@ const ACCESS_LEVEL_LABELS: Record<AccessLevel, string> = {
 
 type AdminUserRow = { id: number; name: string; email: string; role: string; accessLevel: AccessLevel; companyId: number | null; companyName: string | null; supplierId: number | null; supplierName: string | null };
 type SupplierOption = { id: number; name: string };
+type CompanyOption = { id: number; name: string };
 
 function UsersAdmin() {
   const [rows, setRows] = useState<AdminUserRow[]>([]);
   const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
       try {
-        const [{ users: list }, { suppliers: supplierList }] = await Promise.all([
+        const [{ users: list }, { suppliers: supplierList }, { companies: companyList }] = await Promise.all([
           api<{ users: AdminUserRow[] }>("/api/admin/users"),
           api<{ suppliers: SupplierOption[] }>("/api/suppliers"),
+          api<{ companies: CompanyOption[] }>("/api/admin/companies"),
         ]);
         setRows(list);
         setSupplierOptions(supplierList);
+        setCompanyOptions(companyList);
       } catch {
         toast.error("Não foi possível carregar os utilizadores");
       } finally {
@@ -1328,7 +1337,145 @@ function UsersAdmin() {
     }
   };
 
-  return <><PageHeader kicker="GESTÃO DE PLATAFORMA" title="Utilizadores" description="Conceda ou retire permissões — o System Admin é o único nível que pode alterar isto." /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Utilizador</TableHead><TableHead>E-mail</TableHead><TableHead>Empresa</TableHead><TableHead>Nível de acesso</TableHead><TableHead>Fornecedor</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.companyName ?? "—"}</TableCell><TableCell><NativeSelect value={row.accessLevel} disabled={savingId === row.id} onChange={(event) => changeAccessLevel(row.id, event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></TableCell><TableCell>{row.accessLevel === "supplier" ? <NativeSelect value={row.supplierId ?? ""} disabled={savingId === row.id} onChange={(event) => changeSupplier(row.id, row.accessLevel, event.target.value ? Number(event.target.value) : null)} className="field-control"><NativeSelectOption value="">Por ligar…</NativeSelectOption>{supplierOptions.map((supplier) => <NativeSelectOption key={supplier.id} value={supplier.id}>{supplier.name}</NativeSelectOption>)}</NativeSelect> : row.supplierName ?? "—"}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem utilizadores</h3></div>}</div></section></>;
+  const onCreated = (user: AdminUserRow & { companyId: number | null; supplierId: number | null }) => {
+    setRows((current) => [
+      {
+        ...user,
+        companyName: user.companyId != null ? (companyOptions.find((c) => c.id === user.companyId)?.name ?? null) : null,
+        supplierName: user.supplierId != null ? (supplierOptions.find((s) => s.id === user.supplierId)?.name ?? null) : null,
+      },
+      ...current,
+    ]);
+    setFormOpen(false);
+  };
+
+  return <><PageHeader kicker="GESTÃO DE PLATAFORMA" title="Utilizadores" description="Conceda ou retire permissões — o System Admin é o único nível que pode alterar isto." action={<Button className="btn-burgundy" onClick={() => setFormOpen((open) => !open)}><Plus /> Criar utilizador</Button>} />
+    {formOpen && <CreateUserForm companyOptions={companyOptions} supplierOptions={supplierOptions} onCreated={onCreated} onCancel={() => setFormOpen(false)} />}
+    <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Utilizador</TableHead><TableHead>E-mail</TableHead><TableHead>Empresa</TableHead><TableHead>Nível de acesso</TableHead><TableHead>Fornecedor</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.companyName ?? "—"}</TableCell><TableCell><NativeSelect value={row.accessLevel} disabled={savingId === row.id} onChange={(event) => changeAccessLevel(row.id, event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></TableCell><TableCell>{row.accessLevel === "supplier" ? <NativeSelect value={row.supplierId ?? ""} disabled={savingId === row.id} onChange={(event) => changeSupplier(row.id, row.accessLevel, event.target.value ? Number(event.target.value) : null)} className="field-control"><NativeSelectOption value="">Por ligar…</NativeSelectOption>{supplierOptions.map((supplier) => <NativeSelectOption key={supplier.id} value={supplier.id}>{supplier.name}</NativeSelectOption>)}</NativeSelect> : row.supplierName ?? "—"}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem utilizadores</h3></div>}</div></section></>;
+}
+
+function CreateUserForm({
+  companyOptions,
+  supplierOptions,
+  onCreated,
+  onCancel,
+}: {
+  companyOptions: CompanyOption[];
+  supplierOptions: SupplierOption[];
+  onCreated: (user: AdminUserRow & { companyId: number | null; supplierId: number | null }) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("");
+  const [accessLevel, setAccessLevel] = useState<AccessLevel>("requester");
+  const [companyId, setCompanyId] = useState("");
+  const [supplierId, setSupplierId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const needsCompany = accessLevel === "requester" || accessLevel === "company_admin";
+  const needsSupplier = accessLevel === "supplier";
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { user } = await api<{ user: AdminUserRow & { companyId: number | null; supplierId: number | null } }>("/api/admin/users", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          email,
+          role: role.trim() || undefined,
+          accessLevel,
+          companyId: needsCompany && companyId ? Number(companyId) : undefined,
+          supplierId: needsSupplier && supplierId ? Number(supplierId) : undefined,
+        }),
+      });
+      toast.success(`${user.name} criado — enviámos um e-mail para definir a palavra-passe`);
+      onCreated(user);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível criar o utilizador");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section className="panel">
+    <form onSubmit={submit} className="form-grid">
+      <label className="form-field">Nome<Input value={name} onChange={(event) => setName(event.target.value)} required autoFocus /></label>
+      <label className="form-field">E-mail<Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+      <label className="form-field">Cargo (opcional)<Input value={role} onChange={(event) => setRole(event.target.value)} placeholder={ACCESS_LEVEL_LABELS[accessLevel]} /></label>
+      <label className="form-field">Nível de acesso<NativeSelect value={accessLevel} onChange={(event) => setAccessLevel(event.target.value as AccessLevel)} className="field-control">{(Object.keys(ACCESS_LEVEL_LABELS) as AccessLevel[]).map((level) => <NativeSelectOption key={level} value={level}>{ACCESS_LEVEL_LABELS[level]}</NativeSelectOption>)}</NativeSelect></label>
+      {needsCompany && <label className="form-field">Empresa<NativeSelect value={companyId} onChange={(event) => setCompanyId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{companyOptions.map((company) => <NativeSelectOption key={company.id} value={company.id}>{company.name}</NativeSelectOption>)}</NativeSelect></label>}
+      {needsSupplier && <label className="form-field">Fornecedor<NativeSelect value={supplierId} onChange={(event) => setSupplierId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{supplierOptions.map((supplier) => <NativeSelectOption key={supplier.id} value={supplier.id}>{supplier.name}</NativeSelectOption>)}</NativeSelect></label>}
+      <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A criar…" : "Criar utilizador"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
+    </form>
+  </section>;
+}
+
+type TeamUserRow = { id: number; name: string; email: string; role: string; accessLevel: AccessLevel };
+
+// Equipa da própria empresa — só o Administrador da empresa a vê (ver
+// VIEW_ROLES), escopada por session.companyId no próprio handler
+// (GET/POST /api/company/users), nunca por um id escolhido aqui. Fecha o
+// buraco descoberto depois da homologação: o primeiro utilizador de cada
+// empresa era criado automaticamente, mas não havia forma nenhuma de
+// juntar mais colegas sem SQL directo.
+function Team() {
+  const [rows, setRows] = useState<TeamUserRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { users: list } = await api<{ users: TeamUserRow[] }>("/api/company/users");
+        setRows(list);
+      } catch {
+        toast.error("Não foi possível carregar a equipa");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  return <><PageHeader kicker="A MINHA EMPRESA" title="Equipa" description="Convide colegas da sua empresa para o portal." action={<Button className="btn-burgundy" onClick={() => setFormOpen((open) => !open)}><Plus /> Convidar colega</Button>} />
+    {formOpen && <InviteTeamMemberForm onCreated={(user) => { setRows((current) => [user, ...current]); setFormOpen(false); }} onCancel={() => setFormOpen(false)} />}
+    <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Nome</TableHead><TableHead>E-mail</TableHead><TableHead>Cargo</TableHead><TableHead>Nível de acesso</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.name}</strong></TableCell><TableCell>{row.email}</TableCell><TableCell>{row.role}</TableCell><TableCell>{ACCESS_LEVEL_LABELS[row.accessLevel]}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Users /><h3>Sem colegas ainda</h3><p>Convide o primeiro colega para a sua empresa.</p></div>}</div></section>
+  </>;
+}
+
+function InviteTeamMemberForm({ onCreated, onCancel }: { onCreated: (user: TeamUserRow) => void; onCancel: () => void }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [accessLevel, setAccessLevel] = useState<"requester" | "company_admin">("requester");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const { user } = await api<{ user: TeamUserRow }>("/api/company/users", {
+        method: "POST",
+        body: JSON.stringify({ name, email, accessLevel }),
+      });
+      toast.success(`${user.name} convidado — enviámos um e-mail para definir a palavra-passe`);
+      onCreated(user);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível convidar o colega");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <section className="panel">
+    <form onSubmit={submit} className="form-grid">
+      <label className="form-field">Nome<Input value={name} onChange={(event) => setName(event.target.value)} required autoFocus /></label>
+      <label className="form-field">E-mail<Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+      <label className="form-field">Nível de acesso<NativeSelect value={accessLevel} onChange={(event) => setAccessLevel(event.target.value as "requester" | "company_admin")} className="field-control"><NativeSelectOption value="requester">Requisitante</NativeSelectOption><NativeSelectOption value="company_admin">Administrador da empresa</NativeSelectOption></NativeSelect></label>
+      <div className="header-actions"><Button type="submit" className="btn-burgundy" disabled={saving}>{saving ? "A convidar…" : "Convidar colega"} <ArrowRight /></Button><Button type="button" variant="outline" onClick={onCancel}>Cancelar</Button></div>
+    </form>
+  </section>;
 }
 
 type CompanyRow = {

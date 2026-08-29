@@ -140,6 +140,39 @@ export const applicationCreateSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
 });
 
+// Criação directa de utilizador (System Admin, qualquer empresa/nível) —
+// ver POST /api/admin/users. companyId/supplierId só são obrigatórios
+// para os níveis que realmente precisam deles (mesma regra aplicada em
+// db/schema.ts: um "requester"/"company_admin" sem companyId ou um
+// "supplier" sem supplierId fica sem âmbito nenhum).
+export const adminUserCreateSchema = z
+  .object({
+    name: z.string().trim().min(1, "O nome é obrigatório").max(200),
+    email: z.string().trim().min(1, "O e-mail é obrigatório").email("E-mail inválido"),
+    role: z.string().trim().max(120).optional(),
+    accessLevel: z.enum(["system_admin", "coe_manager", "analyst", "supplier", "company_admin", "requester"]),
+    companyId: z.number().int().positive().optional(),
+    supplierId: z.number().int().positive().optional(),
+  })
+  .refine((data) => (["company_admin", "requester"].includes(data.accessLevel) ? data.companyId != null : true), {
+    message: "Indique a empresa para este nível de acesso",
+    path: ["companyId"],
+  })
+  .refine((data) => (data.accessLevel === "supplier" ? data.supplierId != null : true), {
+    message: "Indique o fornecedor para este nível de acesso",
+    path: ["supplierId"],
+  });
+
+// Convite de um colega para a própria empresa (Administrador da empresa)
+// — ver POST /api/company/users. Sem companyId no corpo de propósito: vem
+// sempre da sessão, nunca escolhido pelo chamador — é isso que impede um
+// company_admin de criar um utilizador fora da sua própria empresa.
+export const companyUserInviteSchema = z.object({
+  name: z.string().trim().min(1, "O nome é obrigatório").max(200),
+  email: z.string().trim().min(1, "O e-mail é obrigatório").email("E-mail inválido"),
+  accessLevel: z.enum(["requester", "company_admin"]).default("requester"),
+});
+
 export const applicationReviewSchema = z.union([
   z.object({ status: z.literal("em_avaliacao") }),
   z.object({ status: z.literal("aprovada") }),

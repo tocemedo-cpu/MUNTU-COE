@@ -3,22 +3,7 @@ import { getDb } from "@/db";
 import { applications, companies, suppliers, users } from "@/db/schema";
 import { APPLICATION_REVIEW_ROLES } from "@/lib/application-access";
 import { getOptionalSession } from "@/lib/authz";
-import { sendWelcomeSetPasswordEmail } from "@/lib/mailer";
-import { signPayload } from "@/lib/session";
-
-const WELCOME_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 dias — mesmo prazo usado para repor palavra-passe
-
-function initialsFrom(name: string): string {
-  return (
-    name
-      .split(" ")
-      .map((part) => part[0])
-      .filter(Boolean)
-      .slice(0, 2)
-      .join("")
-      .toUpperCase() || "US"
-  );
-}
+import { provisionUserWithoutPassword } from "@/lib/user-provisioning";
 
 // Homologação (Aprovada -> Homologação -> Acesso Muntu): a única acção que
 // transforma uma candidatura em conta real. Cria a empresa/fornecedor e o
@@ -45,7 +30,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: `Já existe um utilizador com o e-mail ${application.contactEmail}.` }, { status: 409 });
   }
 
-  const initials = initialsFrom(application.contactName);
+  const origin = new URL(request.url).origin;
   let createdCompanyId: number | null = null;
   let createdSupplierId: number | null = null;
   let createdUserId: number;
@@ -66,18 +51,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .returning();
     createdCompanyId = newCompany.id;
 
-    const [newUser] = await db
-      .insert(users)
-      .values({
+    const newUser = await provisionUserWithoutPassword(
+      db,
+      {
         name: application.contactName,
         email: application.contactEmail,
-        password: null,
         role: "Administrador da empresa",
-        initials,
-        companyId: newCompany.id,
         accessLevel: "company_admin",
-      })
-      .returning();
+        companyId: newCompany.id,
+      },
+      origin
+    );
     createdUserId = newUser.id;
   } else {
     const [newSupplier] = await db
@@ -93,18 +77,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .returning();
     createdSupplierId = newSupplier.id;
 
-    const [newUser] = await db
-      .insert(users)
-      .values({
+    const newUser = await provisionUserWithoutPassword(
+      db,
+      {
         name: application.contactName,
         email: application.contactEmail,
-        password: null,
         role: "Fornecedor",
-        initials,
-        supplierId: newSupplier.id,
         accessLevel: "supplier",
-      })
-      .returning();
+        supplierId: newSupplier.id,
+      },
+      origin
+    );
     createdUserId = newUser.id;
   }
 
@@ -121,15 +104,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     })
     .where(eq(applications.id, id))
     .returning();
-
-  const welcomeToken = await signPayload({ userId: createdUserId, purpose: "password_reset" }, WELCOME_TOKEN_TTL_SECONDS);
-  const origin = new URL(request.url).origin;
-  const setPasswordUrl = `${origin}/?reset_token=${encodeURIComponent(welcomeToken)}#login`;
-  try {
-    await sendWelcomeSetPasswordEmail(application.contactEmail, application.contactName, setPasswordUrl);
-  } catch (error) {
-    console.error("Falha ao enviar e-mail de boas-vindas:", error);
-  }
 
   return Response.json({ application: updated });
 }
