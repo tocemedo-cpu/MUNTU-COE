@@ -919,7 +919,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "tenders" && <Tenders user={user} suppliersList={suppliersList} />}
           {view === "contracts" && <Contracts user={user} suppliersList={suppliersList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "catalog" && <Catalog user={user} suppliersList={suppliersList} />}
-          {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} requests={requests} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} requests={requests} user={user} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
@@ -1125,11 +1125,90 @@ function PurchaseOrderTimelineSheet({ po, request, onUploadDocument, onDownloadD
   </div></>;
 }
 
-function PurchaseOrders({ purchaseOrders, requests, onUploadDocument, onDownloadDocument }: { purchaseOrders: PurchaseOrder[]; requests: RequestItem[]; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+function PurchaseOrders({
+  purchaseOrders,
+  requests,
+  user,
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  purchaseOrders: PurchaseOrder[];
+  requests: RequestItem[];
+  user: AuthUser;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
-  return <><PageHeader kicker="PURCHASE ORDER CONTROL TOWER" title="Ordens de compra" description="Emissão, confirmação, expediting, alterações e entrega controlados ponta-a-ponta." action={<Button variant="outline"><Download /> Exportar mapa</Button>} /><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Fornecedor</TableHead><TableHead>Descrição</TableHead><TableHead>Valor AOA</TableHead><TableHead>Estado</TableHead><TableHead>Próxima acção</TableHead><TableHead /></TableRow></TableHeader><TableBody>{purchaseOrders.map((po) => <TableRow key={po.id}><TableCell><strong>{po.id}</strong></TableCell><TableCell>{po.supplier}</TableCell><TableCell>{po.description}</TableCell><TableCell>{money(po.value)}</TableCell><TableCell><span className={statusClass(po.status)}>{po.status}</span></TableCell><TableCell>{po.nextAction}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(po)} aria-label={`Ver linha temporal de ${po.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
+  const [exportFormOpen, setExportFormOpen] = useState(false);
+  const canExport = user.accessLevel === "company_admin" || user.accessLevel === "system_admin";
+  return <><PageHeader kicker="PURCHASE ORDER CONTROL TOWER" title="Ordens de compra" description="Emissão, confirmação, expediting, alterações e entrega controlados ponta-a-ponta." action={canExport ? <Button variant="outline" onClick={() => setExportFormOpen((open) => !open)}><Download /> Exportar mapa</Button> : undefined} />
+    {exportFormOpen && <SapExportForm user={user} onExported={() => setExportFormOpen(false)} />}
+    <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Fornecedor</TableHead><TableHead>Descrição</TableHead><TableHead>Valor AOA</TableHead><TableHead>Estado</TableHead><TableHead>Próxima acção</TableHead><TableHead /></TableRow></TableHeader><TableBody>{purchaseOrders.map((po) => <TableRow key={po.id}><TableCell><strong>{po.id}</strong></TableCell><TableCell>{po.supplier}</TableCell><TableCell>{po.description}</TableCell><TableCell>{money(po.value)}</TableCell><TableCell><span className={statusClass(po.status)}>{po.status}</span></TableCell><TableCell>{po.nextAction}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(po)} aria-label={`Ver linha temporal de ${po.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
   <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <PurchaseOrderTimelineSheet po={selected} request={requests.find((item) => item.id === selected.requestId)} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
   </>;
+}
+
+// Exportação estruturada SAP (CSV, lib/sap-export.ts) — company_admin
+// exporta sempre a sua própria empresa; system_admin escolhe a empresa de
+// uma lista, mesmo padrão de CreateTenderForm/CreateContractForm.
+function SapExportForm({ user, onExported }: { user: AuthUser; onExported: () => void }) {
+  const [periodStart, setPeriodStart] = useState(() => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+  const [periodEnd, setPeriodEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  const [companyId, setCompanyId] = useState("");
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [exporting, setExporting] = useState(false);
+
+  const needsCompany = user.accessLevel === "system_admin";
+
+  useEffect(() => {
+    if (!needsCompany) return;
+    (async () => {
+      try {
+        const { companies } = await api<{ companies: CompanyOption[] }>("/api/admin/companies");
+        setCompanyOptions(companies);
+      } catch {
+        toast.error("Não foi possível carregar as empresas");
+      }
+    })();
+  }, [needsCompany]);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (needsCompany && !companyId) { toast.error("Escolha uma empresa"); return; }
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ periodStart, periodEnd });
+      if (needsCompany) params.set("companyId", companyId);
+      const response = await fetch(`/api/purchase-orders/export/sap?${params.toString()}`);
+      if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Não foi possível gerar o ficheiro");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = `sap-po-export-${periodStart}-${periodEnd}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Mapa SAP exportado");
+      onExported();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível gerar o ficheiro");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return <section className="panel">
+    <form onSubmit={submit} className="form-grid">
+      <label className="form-field">Início do período<Input type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} /></label>
+      <label className="form-field">Fim do período<Input type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} /></label>
+      {needsCompany && <label className="form-field">Empresa<NativeSelect value={companyId} onChange={(event) => setCompanyId(event.target.value)} className="field-control" required><NativeSelectOption value="">Seleccione…</NativeSelectOption>{companyOptions.map((company) => <NativeSelectOption key={company.id} value={company.id}>{company.name}</NativeSelectOption>)}</NativeSelect></label>}
+      <div className="header-actions"><Button type="submit" variant="outline" disabled={exporting}><Download /> {exporting ? "A gerar…" : "Exportar CSV"}</Button></div>
+    </form>
+  </section>;
 }
 
 function ReceiptEvidenceSheet({ receipt, onUploadDocument, onDownloadDocument }: { receipt: Receipt; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
@@ -1319,7 +1398,7 @@ function Administration({ user }: { user: AuthUser }) {
     <section className="admin-grid">
       <article className="panel"><div className="panel-heading"><div><p>ORGANIZAÇÃO</p><h2>{user.tenant}</h2></div><Badge>ANGOLA</Badge></div><div className="admin-fields"><label>Moeda principal<Input value="AOA — Kwanza angolano" readOnly /></label><label>Idioma<Input value="Português (Angola)" readOnly /></label><label>Fuso horário<Input value="Africa/Luanda (UTC+1)" readOnly /></label><label>Regime fiscal<Input value="Angola • IVA 14%" readOnly /></label></div></article>
       <SsoSettings />
-      <article className="panel integration-panel"><div className="panel-heading"><div><p>ROADMAP</p><h2>Integrações</h2></div></div>{[["Banco", "Ficheiro ISO 20022 (pain.001) — Pagamentos", "Activo"], ["Fiscalidade", "AGT / SAF-T — Facturação", "Activo"], ["ERP Financeiro", "SAP S/4HANA", "Planeado"], ["Identidade", "Microsoft Entra ID (via SSO acima)", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article>
+      <article className="panel integration-panel"><div className="panel-heading"><div><p>ROADMAP</p><h2>Integrações</h2></div></div>{[["Banco", "Ficheiro ISO 20022 (pain.001) — Pagamentos", "Activo"], ["Fiscalidade", "AGT / SAF-T — Facturação", "Activo"], ["ERP Financeiro", "Mapa SAP (CSV) — Ordens de compra", "Activo"], ["Identidade", "Microsoft Entra ID (via SSO acima)", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article>
     </section>
   </>;
 }

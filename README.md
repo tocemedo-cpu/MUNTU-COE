@@ -250,6 +250,12 @@ O ecrã **Pagamentos** ganhou um botão "ISO 20022" por lote, que descarrega o f
 
 **Limitação conhecida (fica para depois):** a cadeia de hash criptográfico exigida pela certificação oficial AGT (assinatura RSA encadeada entre facturas, elemento `Hash` de cada `Invoice`) não está implementada — precisaria de infra-estrutura de chaves que este projecto não tem. O elemento é omitido por completo (nunca um valor inventado que parecesse uma assinatura real); este ficheiro serve para conciliação/auditoria interna, não está pronto para submissão oficial à AGT sem essa camada.
 
+## Exportação estruturada SAP (mapa de ordens de compra)
+
+`GET /api/purchase-orders/export/sap?periodStart=&periodEnd=` gera um CSV das ordens de compra de uma empresa num período — para uma empresa cliente que corra SAP conseguir importar o que a Muntu processou por ela, mesma lógica de "trazer os dados reais para fora" das duas exportações acima. Botão "Exportar mapa" no ecrã **Ordens de compra** (`company_admin`/`system_admin` — o mesmo botão já existia na tela, mas até agora não tinha nenhum handler ligado).
+
+O layout do CSV (`CompanyCode`, `PurchasingDocument`, `DocumentDate`, `ItemNumber`, `VendorName`, `ShortText`, `Currency`, `NetOrderValue`, `POStatus`, `Tier`) aproxima-se de um documento de compra SAP MM (EKKO/EKPO simplificado) — `ItemNumber` fica sempre `000010` (convenção SAP de numeração de item) porque este modelo de PO é só de cabeçalho, sem linhas próprias; `CompanyCode`/`VendorName` usam o id da empresa e o nome do fornecedor reais desta app, não um código SAP verdadeiro (não modelado aqui). **Limitação conhecida:** isto é um mapa estruturado para arranque rápido de reconciliação manual/LSMW, não uma integração BAPI/IDoc certificada — cada empresa terá de mapear estas colunas ao layout exacto que o seu próprio SAP espera.
+
 ## Catálogo (preços pré-negociados para "PO catalogado")
 
 O wizard de novo pedido já tinha "PO catalogado" como tipo de transacção (tier automático de facturação, `lib/billing-tiers.ts`) desde uma ronda anterior — mas sem nenhum catálogo real por trás, era só um texto à escolha sem preços nenhuns associados. `catalog_items` (tabela nova) fecha essa lacuna:
@@ -278,6 +284,7 @@ Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo
 | `/api/suppliers` | `GET`, `POST` | Listar/convidar fornecedores — um `supplier` só vê o seu próprio |
 | `/api/suppliers/:id` | `PATCH` | Editar fornecedor — interno: tudo (incluindo IBAN/BIC, ver exportação ISO 20022 acima); `supplier`: só o seu, só categoria/conteúdo local |
 | `/api/purchase-orders` | `GET` | Ordens de compra |
+| `/api/purchase-orders/export/sap` | `GET` | Gera e descarrega o mapa CSV de ordens de compra de uma empresa/período (só `company_admin`/`analyst`/`coe_manager`/`system_admin`) |
 | `/api/receipts` | `GET` | Recepções |
 | `/api/receipts/:id` | `PATCH` | Confirmar recepção |
 | `/api/invoices` | `GET` | Facturas e 3-way match |
