@@ -37,21 +37,26 @@ async function submitApplication(kind: "empresa" | "fornecedor", overrides: Part
   // (companies.domain é único) — precisa de ser único por candidatura, não
   // só o endereço completo, para vários testes/execuções não colidirem.
   const email = overrides.contactEmail ?? `candidato@${uniqueDomain("app-submit")}`;
-  const response = await createApplication(
-    jsonRequest("http://localhost/api/applications", {
-      method: "POST",
-      body: {
-        kind,
-        companyName: overrides.companyName ?? "Nova Operadora Teste",
-        taxId: overrides.taxId ?? "5417123456",
-        sector: overrides.sector ?? "Logística",
-        contactName: overrides.contactName ?? "Cliente Candidato",
-        contactEmail: email,
-        contactPhone: overrides.contactPhone ?? "+244 900 000 000",
-        notes: overrides.notes ?? "Queremos aderir ao Muntu COE.",
-      },
-    })
-  );
+  const request = jsonRequest("http://localhost/api/applications", {
+    method: "POST",
+    body: {
+      kind,
+      companyName: overrides.companyName ?? "Nova Operadora Teste",
+      taxId: overrides.taxId ?? "5417123456",
+      sector: overrides.sector ?? "Logística",
+      contactName: overrides.contactName ?? "Cliente Candidato",
+      contactEmail: email,
+      contactPhone: overrides.contactPhone ?? "+244 900 000 000",
+      notes: overrides.notes ?? "Queremos aderir ao Muntu COE.",
+    },
+  });
+  // IP distinto por candidatura simulada — este ficheiro submete muito
+  // mais candidaturas do que um utilizador real submeteria numa hora, e
+  // todas partilhariam o mesmo "sem x-forwarded-for" sem isto, tropeçando
+  // no limite de pedidos por IP (ver lib/rate-limit.ts) que existe mesmo
+  // para proteger contra spam real do formulário público.
+  request.headers.set("x-forwarded-for", `203.0.113.${1 + Math.floor(Math.random() * 254)}`);
+  const response = await createApplication(request);
   expect(response.status).toBe(201);
   const body = await response.json();
   return { body, email };

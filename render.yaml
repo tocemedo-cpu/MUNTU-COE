@@ -1,3 +1,13 @@
+# CRON_SECRET tem de ser o mesmo valor no serviço web e nos três Cron
+# Jobs abaixo (o web compara o que os jobs enviam no cabeçalho
+# x-cron-secret com o seu próprio) — um grupo partilhado garante isso
+# (generateValue corre uma vez para o grupo, não uma vez por serviço).
+envVarGroups:
+  - name: muntu-coe-cron-secret
+    envVars:
+      - key: CRON_SECRET
+        generateValue: true
+
 services:
   - type: web
     name: muntu-coe-portal
@@ -18,8 +28,7 @@ services:
         sync: false
       - key: SESSION_SECRET
         generateValue: true
-      - key: CRON_SECRET
-        generateValue: true
+      - fromGroup: muntu-coe-cron-secret
       # Opcionais — "Recuperar acesso" no login funciona sem eles (nunca
       # falha), só não envia e-mail de verdade sem as duas definidas.
       - key: BREVO_API_KEY
@@ -30,3 +39,58 @@ services:
       # (exportação AGT/SAF-T); sem ele, essa rota recusa com 501.
       - key: MUNTU_NIF
         sync: false
+
+  # Os três Cron Jobs abaixo só chamam a rota já existente no serviço web
+  # (curl com o segredo partilhado) — nenhum deles corre código próprio.
+  # Sem isto, /api/admin/sla-alerts/run, /api/admin/payment-release/run e
+  # /api/admin/billing/generate-monthly existiam mas nunca eram chamados
+  # por ninguém em produção. Cron Jobs no Render exigem um plano pago
+  # (não existem no plano "free") — por isso `plan` fica por definir aqui
+  # de propósito; escolha o plano ao criar o blueprint no dashboard.
+  - type: cron
+    name: muntu-coe-sla-alerts
+    runtime: node
+    branch: main
+    schedule: "*/15 * * * *" # a cada 15 minutos — alertas de SLA precisam de ser atempados
+    buildCommand: "true"
+    startCommand: >-
+      curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" "https://$MUNTU_HOST/api/admin/sla-alerts/run"
+    envVars:
+      - fromGroup: muntu-coe-cron-secret
+      - key: MUNTU_HOST
+        fromService:
+          type: web
+          name: muntu-coe-portal
+          property: host
+
+  - type: cron
+    name: muntu-coe-payment-release
+    runtime: node
+    branch: main
+    schedule: "0 6 * * *" # diário, 06:00 UTC — libertação de pagamento não é tão urgente como SLA
+    buildCommand: "true"
+    startCommand: >-
+      curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" "https://$MUNTU_HOST/api/admin/payment-release/run"
+    envVars:
+      - fromGroup: muntu-coe-cron-secret
+      - key: MUNTU_HOST
+        fromService:
+          type: web
+          name: muntu-coe-portal
+          property: host
+
+  - type: cron
+    name: muntu-coe-billing-monthly
+    runtime: node
+    branch: main
+    schedule: "0 3 1 * *" # dia 1 de cada mês, 03:00 UTC — "generate-monthly" é mesmo mensal
+    buildCommand: "true"
+    startCommand: >-
+      curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" "https://$MUNTU_HOST/api/admin/billing/generate-monthly"
+    envVars:
+      - fromGroup: muntu-coe-cron-secret
+      - key: MUNTU_HOST
+        fromService:
+          type: web
+          name: muntu-coe-portal
+          property: host

@@ -1,17 +1,24 @@
-import { and, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, like, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { invoices } from "@/db/schema";
 import { getSession } from "@/lib/authz";
+import { parseLimit } from "@/lib/pagination";
 
 export async function GET(request: Request) {
   const db = getDb();
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
   const session = getSession(request);
+  const limit = parseLimit(request);
 
   if (session.accessLevel === "supplier") {
     if (session.supplierId == null) return Response.json({ invoices: [] });
-    const rows = await db.select().from(invoices).where(eq(invoices.supplierId, session.supplierId));
+    const rows = await db
+      .select()
+      .from(invoices)
+      .where(eq(invoices.supplierId, session.supplierId))
+      .orderBy(desc(invoices.createdAt))
+      .limit(limit);
     return Response.json({ invoices: rows });
   }
 
@@ -33,7 +40,9 @@ export async function GET(request: Request) {
   const rows = await db
     .select()
     .from(invoices)
-    .where(conditions.length ? and(...conditions) : undefined);
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(invoices.createdAt))
+    .limit(limit);
 
   return Response.json({ invoices: rows });
 }

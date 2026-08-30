@@ -438,6 +438,40 @@ create index if not exists idx_exceptions_resolved on public.exceptions (resolve
 create index if not exists idx_payment_batches_released on public.payment_batches (released);
 create index if not exists idx_applications_status on public.applications (status);
 
+-- Postgres não indexa colunas de FK automaticamente. company_id/supplier_id
+-- são o filtro de âmbito (company_admin -> própria empresa, supplier ->
+-- próprio fornecedor) usado em quase todas as rotas de listagem desta
+-- app — sem índice, cada uma delas é um sequential scan à medida que a
+-- tabela cresce. Espelha os índices equivalentes em db/schema.ts.
+create index if not exists users_company_id_idx on public.users (company_id);
+create index if not exists users_supplier_id_idx on public.users (supplier_id);
+create index if not exists requests_company_id_idx on public.requests (company_id);
+create index if not exists requests_owner_user_id_idx on public.requests (owner_user_id);
+create index if not exists purchase_orders_company_id_idx on public.purchase_orders (company_id);
+create index if not exists purchase_orders_supplier_id_idx on public.purchase_orders (supplier_id);
+create index if not exists purchase_orders_request_id_idx on public.purchase_orders (request_id);
+create index if not exists po_events_po_id_idx on public.po_events (po_id);
+create index if not exists tenders_company_id_idx on public.tenders (company_id);
+create index if not exists tender_invites_supplier_id_idx on public.tender_invites (supplier_id);
+create index if not exists bids_supplier_id_idx on public.bids (supplier_id);
+create index if not exists contracts_company_id_idx on public.contracts (company_id);
+create index if not exists contracts_supplier_id_idx on public.contracts (supplier_id);
+create index if not exists catalog_items_supplier_id_idx on public.catalog_items (supplier_id);
+create index if not exists receipts_company_id_idx on public.receipts (company_id);
+create index if not exists receipts_supplier_id_idx on public.receipts (supplier_id);
+create index if not exists invoices_company_id_idx on public.invoices (company_id);
+create index if not exists invoices_supplier_id_idx on public.invoices (supplier_id);
+create index if not exists exceptions_company_id_idx on public.exceptions (company_id);
+create index if not exists payment_batches_company_id_idx on public.payment_batches (company_id);
+create index if not exists client_invoices_company_id_idx on public.client_invoices (company_id);
+create index if not exists client_invoice_lines_client_invoice_id_idx on public.client_invoice_lines (client_invoice_id);
+create index if not exists documents_entity_type_id_idx on public.documents (entity_type, entity_id);
+create index if not exists applications_assigned_to_user_id_idx on public.applications (assigned_to_user_id);
+create index if not exists support_tickets_company_id_idx on public.support_tickets (company_id);
+create index if not exists support_tickets_user_id_idx on public.support_tickets (user_id);
+create index if not exists support_tickets_assigned_to_user_id_idx on public.support_tickets (assigned_to_user_id);
+create index if not exists support_messages_ticket_id_idx on public.support_messages (ticket_id);
+
 -- -----------------------------------------------------------------
 -- Row Level Security
 -- Estas políticas são permissivas (leitura/escrita públicas) para

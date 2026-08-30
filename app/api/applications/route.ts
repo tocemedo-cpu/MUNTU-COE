@@ -5,8 +5,14 @@ import { APPLICATION_REVIEW_ROLES, APPLICATION_TOKEN_TTL_SECONDS, type Applicati
 import { getOptionalSession } from "@/lib/authz";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { sendApplicationReceivedEmail } from "@/lib/mailer";
+import { clientIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
 import { signPayload } from "@/lib/session";
 import { applicationCreateSchema, parseJsonBody } from "@/lib/validation";
+
+// Sem sessão nenhuma exigida de propósito (ver comentário do POST abaixo)
+// — sem isto, ficava aberto a spam ilimitado de candidaturas.
+const APPLICATION_SUBMIT_LIMIT = 5;
+const APPLICATION_SUBMIT_WINDOW_MS = 60 * 60 * 1000;
 
 // Listagem interna (Muntu) das candidaturas por avaliar/homologar. Quem
 // ainda não tem sessão nenhuma (o candidato) nunca chega aqui — a consulta
@@ -28,6 +34,10 @@ export async function GET(request: Request) {
 // (OPTIONAL_AUTH_PREFIXES) e o README, secção "Como um utilizador real
 // chega à plataforma".
 export async function POST(request: Request) {
+  if (isRateLimited(`application-submit:${clientIp(request)}`, APPLICATION_SUBMIT_LIMIT, APPLICATION_SUBMIT_WINDOW_MS)) {
+    return rateLimitResponse();
+  }
+
   const db = getDb();
   const parsed = await parseJsonBody(request, applicationCreateSchema);
   if (!parsed.success) return parsed.response;

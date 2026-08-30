@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { CSRF_COOKIE_NAME, verifyCsrfToken } from "@/lib/csrf";
 import { SESSION_COOKIE_NAME, verifySessionToken, type AccessLevel } from "@/lib/session";
+
+// Métodos que só leem — nunca precisam de token CSRF, mesmo com sessão.
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 const PUBLIC_API_PATHS = new Set([
   "/api/auth/login",
@@ -18,6 +22,9 @@ const PUBLIC_API_PATHS = new Set([
   // Estatísticas agregadas e não sensíveis para o site público e o login,
   // mostradas antes de haver sessão nenhuma — ver app/api/public-stats.
   "/api/public-stats",
+  // Health check para monitorização — quem chama (Render, uptime checker)
+  // não tem sessão nenhuma.
+  "/api/health",
 ]);
 
 // Prefixos de acesso misto: quem ainda não tem conta nenhuma (candidato a
@@ -82,6 +89,18 @@ export async function middleware(request: NextRequest) {
   if (!session) {
     if (isOptionalAuthPath(pathname)) return NextResponse.next();
     return NextResponse.json({ error: "Sessão inválida ou expirada. Inicie sessão novamente." }, { status: 401 });
+  }
+
+  // Double-submit CSRF (ver lib/csrf.ts) — só para pedidos que mudam
+  // estado, e só depois de confirmar que há mesmo uma sessão (login em si
+  // não tem cookie CSRF ainda nenhum para comparar, por isso está em
+  // PUBLIC_API_PATHS e nunca chega aqui).
+  if (!SAFE_METHODS.has(request.method)) {
+    const csrfCookie = request.cookies.get(CSRF_COOKIE_NAME)?.value;
+    const csrfHeader = request.headers.get("x-csrf-token");
+    if (!verifyCsrfToken(csrfCookie, csrfHeader)) {
+      return NextResponse.json({ error: "Token CSRF inválido ou em falta." }, { status: 403 });
+    }
   }
 
   const rule = ROUTE_ACCESS.find((r) => pathname.startsWith(r.prefix));

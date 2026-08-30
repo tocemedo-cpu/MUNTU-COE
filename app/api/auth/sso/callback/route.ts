@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { getDb } from "@/db";
 import { companies, users } from "@/db/schema";
+import { CSRF_COOKIE_NAME, generateCsrfToken } from "@/lib/csrf";
 import { discoverOidc, exchangeCodeForTokens } from "@/lib/oidc";
 import {
   createSessionToken,
@@ -107,6 +108,14 @@ export async function GET(request: NextRequest) {
     });
     store.set(SESSION_COOKIE_NAME, token, {
       httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: SESSION_TTL_SECONDS,
+    });
+    // Legível por JS de propósito (sem httpOnly) — ver lib/csrf.ts.
+    store.set(CSRF_COOKIE_NAME, generateCsrfToken(), {
+      httpOnly: false,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",

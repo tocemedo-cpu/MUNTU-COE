@@ -4,6 +4,7 @@ import { requests, users } from "@/db/schema";
 import { getSession } from "@/lib/authz";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { formatPtDateTime } from "@/lib/format";
+import { parseLimit } from "@/lib/pagination";
 import { computeRequestSlaDueAt } from "@/lib/requests-sla";
 import { parseJsonBody, requestCreateSchema } from "@/lib/validation";
 
@@ -35,7 +36,8 @@ export async function GET(request: Request) {
     .select()
     .from(requests)
     .where(scopeConditions.length ? and(...scopeConditions) : undefined)
-    .orderBy(desc(requests.createdAt));
+    .orderBy(desc(requests.createdAt))
+    .limit(parseLimit(request));
 
   return Response.json({ requests: rows });
 }

@@ -172,11 +172,27 @@ class ApiError extends Error {
   }
 }
 
+// Nome tem de bater certo com lib/csrf.ts#CSRF_COOKIE_NAME — não importado
+// directamente para não puxar lib/session.ts (código de servidor) para o
+// bundle do cliente só por uma constante de string.
+const CSRF_COOKIE_NAME = "muntu_csrf";
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...init,
-  });
+  // Double-submit CSRF (ver middleware.ts): reenvia como cabeçalho o
+  // valor do cookie legível por JS que o login/SSO deixou — o middleware
+  // recusa qualquer pedido que mude estado sem os dois baterem certo.
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  const csrfToken = readCookie(CSRF_COOKIE_NAME);
+  if (csrfToken) headers.set("x-csrf-token", csrfToken);
+
+  const response = await fetch(path, { ...init, headers });
   if (response.status === 401 && typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
   }
@@ -365,7 +381,16 @@ function CandidaturaScreen({
       const formData = new FormData();
       formData.append("token", token);
       formData.append("file", file);
-      const response = await fetch(`/api/applications/${encodeURIComponent(applicationId)}/documents`, { method: "POST", body: formData });
+      // Esta rota autoriza-se pelo token da candidatura, nunca por sessão
+      // — mas se por acaso houver também uma sessão Muntu válida no mesmo
+      // browser (ex.: um revisor a testar o link), o middleware ainda
+      // exige o cabeçalho CSRF para qualquer pedido que muda estado.
+      const csrfToken = readCookie(CSRF_COOKIE_NAME);
+      const response = await fetch(`/api/applications/${encodeURIComponent(applicationId)}/documents`, {
+        method: "POST",
+        body: formData,
+        headers: csrfToken ? { "x-csrf-token": csrfToken } : undefined,
+      });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Não foi possível anexar o documento");
       setDocs((items) => [data.document as ApplicationDocument, ...items]);
@@ -854,7 +879,15 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       formData.append("request", options?.request ?? "—");
       if (options?.entityType) formData.append("entityType", options.entityType);
       if (options?.entityId) formData.append("entityId", options.entityId);
-      const response = await fetch("/api/documents", { method: "POST", body: formData });
+      // Fora de api(): FormData não pode ir em JSON, mas o pedido continua
+      // autenticado e a mudar estado, por isso continua a precisar do
+      // cabeçalho CSRF que api() normalmente trata sozinho.
+      const csrfToken = readCookie(CSRF_COOKIE_NAME);
+      const response = await fetch("/api/documents", {
+        method: "POST",
+        body: formData,
+        headers: csrfToken ? { "x-csrf-token": csrfToken } : undefined,
+      });
       if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Não foi possível carregar o documento");

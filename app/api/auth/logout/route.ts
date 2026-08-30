@@ -1,5 +1,9 @@
+import { clearCsrfCookieHeader } from "@/lib/csrf";
 import { clearSessionCookieHeader } from "@/lib/session";
 
 export async function POST() {
-  return Response.json({ ok: true }, { headers: { "Set-Cookie": clearSessionCookieHeader() } });
+  const headers = new Headers();
+  headers.append("Set-Cookie", clearSessionCookieHeader());
+  headers.append("Set-Cookie", clearCsrfCookieHeader());
+  return Response.json({ ok: true }, { headers });
 }
