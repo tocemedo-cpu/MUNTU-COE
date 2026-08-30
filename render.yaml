@@ -26,3 +26,7 @@ services:
         sync: false
       - key: BREVO_FROM_EMAIL
         sync: false
+      # Opcional — só exigido por GET /api/admin/billing/export/saft
+      # (exportação AGT/SAF-T); sem ele, essa rota recusa com 501.
+      - key: MUNTU_NIF
+        sync: false

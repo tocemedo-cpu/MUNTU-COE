@@ -344,6 +344,9 @@ describe("POST /api/applications/:id/homologate", () => {
     expect(newUser.password).toBeNull();
     const [newCompany] = await db.select().from(companies).where(eq(companies.id, newUser.companyId!));
     expect(newCompany.name).toBe(homologatedBody.application.companyName);
+    // NIF copiado da candidatura — alimenta a exportação AGT/SAF-T
+    // (lib/saft.ts) sem precisar de ser preenchido à mão depois.
+    expect(newCompany.taxId).toBe("5417123456");
 
     // Idempotency: cannot homologate the same application twice.
     const again = await homologateApplication(

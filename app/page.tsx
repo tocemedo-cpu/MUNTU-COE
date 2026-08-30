@@ -1319,7 +1319,7 @@ function Administration({ user }: { user: AuthUser }) {
     <section className="admin-grid">
       <article className="panel"><div className="panel-heading"><div><p>ORGANIZAÇÃO</p><h2>{user.tenant}</h2></div><Badge>ANGOLA</Badge></div><div className="admin-fields"><label>Moeda principal<Input value="AOA — Kwanza angolano" readOnly /></label><label>Idioma<Input value="Português (Angola)" readOnly /></label><label>Fuso horário<Input value="Africa/Luanda (UTC+1)" readOnly /></label><label>Regime fiscal<Input value="Angola • IVA 14%" readOnly /></label></div></article>
       <SsoSettings />
-      <article className="panel integration-panel"><div className="panel-heading"><div><p>ROADMAP</p><h2>Integrações</h2></div></div>{[["Banco", "Ficheiro ISO 20022 (pain.001) — Pagamentos", "Activo"], ["ERP Financeiro", "SAP S/4HANA", "Planeado"], ["Fiscalidade", "AGT / SAF-T", "Planeado"], ["Identidade", "Microsoft Entra ID (via SSO acima)", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article>
+      <article className="panel integration-panel"><div className="panel-heading"><div><p>ROADMAP</p><h2>Integrações</h2></div></div>{[["Banco", "Ficheiro ISO 20022 (pain.001) — Pagamentos", "Activo"], ["Fiscalidade", "AGT / SAF-T — Facturação", "Activo"], ["ERP Financeiro", "SAP S/4HANA", "Planeado"], ["Identidade", "Microsoft Entra ID (via SSO acima)", "Planeado"]].map((item) => <div key={item[0]}><span><Network /></span><div><strong>{item[0]}</strong><small>{item[1]}</small></div><b className={statusClass(item[2])}>{item[2]}</b></div>)}</article>
     </section>
   </>;
 }
@@ -2116,6 +2116,7 @@ type CompanyRow = {
   hasSsoClientSecret: boolean;
   iban: string | null;
   bic: string | null;
+  taxId: string | null;
 };
 type BillingRateRow = { key: string; label: string; amount: number; updatedAt: string };
 type ClientInvoiceRow = {
@@ -2212,6 +2213,50 @@ function ClientBilling() {
     }
   };
 
+  const saveTaxId = async (companyId: number, taxId: string) => {
+    setSavingCompanyId(companyId);
+    try {
+      const { company } = await api<{ company: CompanyRow }>(`/api/admin/companies/${companyId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ taxId }),
+      });
+      setCompaniesList((current) => current.map((row) => (row.id === companyId ? company : row)));
+      toast.success(`NIF de ${company.name} actualizado`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar o NIF");
+    } finally {
+      setSavingCompanyId(null);
+    }
+  };
+
+  const [saftPeriod, setSaftPeriod] = useState({ periodStart: today, periodEnd: today });
+  const [exportingSaft, setExportingSaft] = useState(false);
+
+  const exportSaft = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setExportingSaft(true);
+    try {
+      const response = await fetch(`/api/admin/billing/export/saft?periodStart=${saftPeriod.periodStart}&periodEnd=${saftPeriod.periodEnd}`);
+      if (response.status === 401) window.dispatchEvent(new CustomEvent("muntu:unauthorized"));
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Não foi possível gerar o ficheiro");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = `saft-agt-${saftPeriod.periodStart}-${saftPeriod.periodEnd}.xml`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success("Ficheiro SAF-T gerado");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível gerar o ficheiro");
+    } finally {
+      setExportingSaft(false);
+    }
+  };
+
   const generate = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form.companyId) { toast.error("Escolha uma empresa"); return; }
@@ -2264,8 +2309,17 @@ function ClientBilling() {
       <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Tarifa</TableHead><TableHead>Valor (AOA)</TableHead><TableHead>Actualizada</TableHead></TableRow></TableHeader><TableBody>{rates.map((rate) => <TableRow key={rate.key}><TableCell><strong>{rate.label}</strong></TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={rate.amount} disabled={savingRateKey === rate.key} onBlur={(event) => { const value = Number(event.target.value); if (value !== rate.amount) saveRate(rate.key, value); }} className="rate-input" /></TableCell><TableCell>{new Date(rate.updatedAt).toLocaleDateString("pt-PT")}</TableCell></TableRow>)}</TableBody></Table>{!loading && rates.length === 0 && <div className="empty-state"><Landmark /><h3>Sem tarifas semeadas</h3><p>A facturação usa os valores por omissão do Estudo de Viabilidade até semear <code>billing_rates</code>.</p></div>}</div>
     </section>
     <section className="panel">
-      <div className="panel-heading"><div><p>CONFIGURAÇÃO</p><h2>Retainer por empresa</h2></div></div>
-      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Empresa</TableHead><TableHead>Domínio</TableHead><TableHead>Retainer mensal (AOA)</TableHead></TableRow></TableHeader><TableBody>{companiesList.map((company) => <TableRow key={company.id}><TableCell><strong>{company.name}</strong></TableCell><TableCell>{company.domain}</TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={company.retainerAmount} disabled={savingCompanyId === company.id} onBlur={(event) => { const value = Number(event.target.value); if (value !== company.retainerAmount) saveRetainer(company.id, value); }} className="rate-input" /></TableCell></TableRow>)}</TableBody></Table>{!loading && companiesList.length === 0 && <div className="empty-state"><Landmark /><h3>Sem empresas registadas</h3></div>}</div>
+      <div className="panel-heading"><div><p>CONFIGURAÇÃO</p><h2>Retainer e NIF por empresa</h2></div></div>
+      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Empresa</TableHead><TableHead>Domínio</TableHead><TableHead>Retainer mensal (AOA)</TableHead><TableHead>NIF (exportação SAF-T)</TableHead></TableRow></TableHeader><TableBody>{companiesList.map((company) => <TableRow key={company.id}><TableCell><strong>{company.name}</strong></TableCell><TableCell>{company.domain}</TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={company.retainerAmount} disabled={savingCompanyId === company.id} onBlur={(event) => { const value = Number(event.target.value); if (value !== company.retainerAmount) saveRetainer(company.id, value); }} className="rate-input" /></TableCell><TableCell><Input defaultValue={company.taxId ?? ""} placeholder="Não definido" disabled={savingCompanyId === company.id} onBlur={(event) => { const value = event.target.value.trim(); if (value !== (company.taxId ?? "")) saveTaxId(company.id, value); }} className="rate-input" /></TableCell></TableRow>)}</TableBody></Table>{!loading && companiesList.length === 0 && <div className="empty-state"><Landmark /><h3>Sem empresas registadas</h3></div>}</div>
+    </section>
+    <section className="panel">
+      <div className="panel-heading"><div><p>FISCALIDADE</p><h2>Exportação AGT/SAF-T</h2></div></div>
+      <p className="muted">Gera um ficheiro SAF-T (Header + Clientes + Facturas de venda) com as facturas de cliente aprovadas no período — todas as empresas facturadas precisam de ter NIF definido acima.</p>
+      <form onSubmit={exportSaft} className="form-grid">
+        <label className="form-field">Início do período<Input type="date" value={saftPeriod.periodStart} onChange={(event) => setSaftPeriod((current) => ({ ...current, periodStart: event.target.value }))} /></label>
+        <label className="form-field">Fim do período<Input type="date" value={saftPeriod.periodEnd} onChange={(event) => setSaftPeriod((current) => ({ ...current, periodEnd: event.target.value }))} /></label>
+        <div className="header-actions"><Button type="submit" variant="outline" disabled={exportingSaft}><Download /> {exportingSaft ? "A gerar…" : "Exportar SAF-T"}</Button></div>
+      </form>
     </section>
   </>;
 }

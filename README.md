@@ -240,6 +240,16 @@ Pré-requisitos, verificados antes de gerar o ficheiro (nunca um XML incompleto 
 
 O ecrã **Pagamentos** ganhou um botão "ISO 20022" por lote, que descarrega o ficheiro directamente (mesmo padrão de descarga por blob já usado para documentos).
 
+## Exportação fiscal AGT/SAF-T
+
+`GET /api/admin/billing/export/saft?periodStart=&periodEnd=` gera um subconjunto real do SAF-T AGT (Ficheiro Normalizado de Auditoria Tributária, adaptação angolana do standard SAF-T) — `Header` + `MasterFiles/Customer` + `SourceDocuments/SalesInvoices` — cobrindo as facturas de cliente (`client_invoices`, já `aprovada`/`enviada_contabilidade`) que a Muntu emite às empresas que serve.
+
+- **NIF de cada empresa cliente** — `companies.tax_id` (coluna nova), copiado automaticamente de `applications.tax_id` na homologação de uma candidatura "empresa"; empresas anteriores a essa cópia (dados semeados, ou criadas por outra via) ficam nulas até serem preenchidas na página **Facturação** (painel "Retainer e NIF por empresa", `system_admin`). Se alguma empresa facturada no período não tiver NIF, a exportação recusa com `400` e a lista dos ids das empresas em causa, em vez de gerar um ficheiro com um `CustomerTaxID` em branco.
+- **NIF da própria Muntu** — variável de ambiente `MUNTU_NIF`, exigida (mesmo padrão de `CRON_SECRET`/`BREVO_API_KEY`: sem ela definida, a rota recusa sempre com `501`, nunca gera um ficheiro sem o identificador do próprio emitente).
+- **IVA 14%** — `client_invoices.total_amount` não separa IVA de valor líquido (não modelado em mais nenhum sítio da app); a decomposição `NetTotal`/`TaxPayable` de cada `Invoice` aplica a mesma taxa de 14% já mostrada como regime fiscal fixo em **Administração** ("Angola • IVA 14%") — não é um valor novo inventado para isto.
+
+**Limitação conhecida (fica para depois):** a cadeia de hash criptográfico exigida pela certificação oficial AGT (assinatura RSA encadeada entre facturas, elemento `Hash` de cada `Invoice`) não está implementada — precisaria de infra-estrutura de chaves que este projecto não tem. O elemento é omitido por completo (nunca um valor inventado que parecesse uma assinatura real); este ficheiro serve para conciliação/auditoria interna, não está pronto para submissão oficial à AGT sem essa camada.
+
 ## Catálogo (preços pré-negociados para "PO catalogado")
 
 O wizard de novo pedido já tinha "PO catalogado" como tipo de transacção (tier automático de facturação, `lib/billing-tiers.ts`) desde uma ronda anterior — mas sem nenhum catálogo real por trás, era só um texto à escolha sem preços nenhuns associados. `catalog_items` (tabela nova) fecha essa lacuna:
@@ -286,6 +296,7 @@ Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo
 | `/api/admin/billing` | `GET`, `POST` | Lista/gera facturas de cobrança a clientes (só `system_admin`) |
 | `/api/admin/billing/:id` | `GET`, `PATCH` | Detalhe e aprovar/rejeitar/enviar à contabilidade (só `system_admin`) |
 | `/api/admin/billing/generate-monthly` | `POST` | Geração mensal automática — autenticada por `CRON_SECRET`, não por sessão |
+| `/api/admin/billing/export/saft` | `GET` | Gera e descarrega o ficheiro SAF-T (AGT) das facturas de cliente aprovadas no período (só `system_admin`) |
 | `/api/admin/sla-alerts/run` | `POST` | Alertas de SLA vencido + escalonamento — autenticada por `CRON_SECRET`, não por sessão |
 | `/api/admin/payment-release/run` | `POST` | Liberta automaticamente lotes de pagamento sem excepções/risco por resolver — autenticada por `CRON_SECRET`, não por sessão |
 | `/api/admin/billing-rates` | `GET` | Lista as tarifas de facturação (só `system_admin`) |

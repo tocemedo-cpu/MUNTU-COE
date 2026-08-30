@@ -132,6 +132,8 @@ export const companyUpdateSchema = z.object({
   // Conta devedora — só usada por lib/iso20022.ts.
   iban: z.string().trim().max(34).optional(),
   bic: z.string().trim().max(11).optional(),
+  // NIF — só usado por lib/saft.ts (exportação AGT/SAF-T).
+  taxId: z.string().trim().max(40).optional(),
 });
 
 export const supportTicketCreateSchema = z.object({

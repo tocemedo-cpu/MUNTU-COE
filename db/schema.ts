@@ -24,6 +24,11 @@ export const companies = pgTable("companies", {
   // há Document iniciador válido sem IBAN/BIC do devedor).
   iban: text("iban"),
   bic: text("bic"),
+  // NIF — ver lib/saft.ts (exportação AGT/SAF-T). Preenchido a partir de
+  // applications.tax_id na homologação (só para candidaturas "empresa");
+  // empresas anteriores a essa cópia ficam nulas até serem preenchidas à
+  // mão em Administração.
+  taxId: text("tax_id"),
 });
 
 export const users = pgTable("users", {

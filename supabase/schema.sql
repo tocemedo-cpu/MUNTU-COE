@@ -31,6 +31,11 @@ alter table public.companies add column if not exists retainer_amount bigint not
 alter table public.companies add column if not exists iban text;
 alter table public.companies add column if not exists bic text;
 
+-- NIF — ver lib/saft.ts (exportação AGT/SAF-T). Preenchido a partir de
+-- applications.tax_id na homologação; empresas anteriores a essa cópia
+-- ficam nulas até serem preenchidas à mão em Administração.
+alter table public.companies add column if not exists tax_id text;
+
 create table if not exists public.users (
   id bigint generated always as identity primary key,
   name text not null,

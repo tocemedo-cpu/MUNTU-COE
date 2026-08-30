@@ -47,7 +47,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const [newCompany] = await db
       .insert(companies)
-      .values({ name: application.companyName, domain, authMethod: "password" })
+      .values({ name: application.companyName, domain, authMethod: "password", taxId: application.taxId })
       .returning();
     createdCompanyId = newCompany.id;
 

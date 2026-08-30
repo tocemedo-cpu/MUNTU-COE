@@ -20,6 +20,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (parsed.data.ssoClientSecret) updates.ssoClientSecret = parsed.data.ssoClientSecret;
   if (parsed.data.iban !== undefined) updates.iban = parsed.data.iban || null;
   if (parsed.data.bic !== undefined) updates.bic = parsed.data.bic || null;
+  if (parsed.data.taxId !== undefined) updates.taxId = parsed.data.taxId || null;
 
   if (Object.keys(updates).length === 0) {
     return Response.json({ error: "Nada para actualizar" }, { status: 400 });
