@@ -207,6 +207,18 @@ create table if not exists public.catalog_items (
   created_at timestamptz not null default now()
 );
 
+-- Linha temporal real de uma PO — cada linha é um evento que realmente
+-- aconteceu, nunca um estado calculado. user_id nulo é um evento gerado
+-- pelo sistema (ex.: criação a partir da aprovação de um pedido).
+create table if not exists public.po_events (
+  id bigint generated always as identity primary key,
+  po_id text not null references public.purchase_orders (id),
+  type text not null, -- criada | confirmada | expediting | entregue | excepcao | excepcao_resolvida
+  description text not null,
+  user_id bigint references public.users (id),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.receipts (
   id bigint generated always as identity primary key,
   po text not null,
@@ -457,6 +469,7 @@ alter table public.tenders enable row level security;
 alter table public.tender_invites enable row level security;
 alter table public.bids enable row level security;
 alter table public.contracts enable row level security;
+alter table public.po_events enable row level security;
 alter table public.catalog_items enable row level security;
 
 drop policy if exists "public read requests" on public.requests;
@@ -502,8 +515,9 @@ create policy "public write documents" on public.documents for insert with check
 -- `support_tickets`, `support_messages`, `applications`,
 -- `consumed_tokens`, `tenders`, `tender_invites`, `bids` (propostas de
 -- fornecedores concorrentes nunca podem ficar legíveis por anon key),
--- `contracts` nem `catalog_items` (valores, termos contratuais e preços
--- pré-negociados são dados comerciais sensíveis): mantém-nas
+-- `contracts`, `catalog_items` (valores, termos contratuais e preços
+-- pré-negociados são dados comerciais sensíveis) nem `po_events`
+-- (histórico operacional interno): mantém-nas
 -- ilegíveis pela API pública/anon key (segredos de SSO, dados financeiros,
 -- dados de candidatos, bytes reais dos
 -- ficheiros carregados e conteúdo de pedidos de suporte dos utilizadores).

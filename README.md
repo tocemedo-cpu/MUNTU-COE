@@ -162,7 +162,19 @@ Os botões "Ver" que antes só abriam um `toast.info()` — Supplier Passport, l
 
 Isto obrigou a abrir `/api/documents` a qualquer sessão válida no `middleware.ts` (deixou de estar restrito a `company_admin`/`analyst`/`coe_manager`/`system_admin`) — a autorização real passou a ser por linha, feita no próprio handler, o mesmo padrão já usado por `/api/requests`/`/api/suppliers`. Isto também corrigiu um bug real descoberto ao construir isto: o anexo do wizard de novo pedido (`NewRequest`, adicionado numa ronda anterior) nunca tinha sido testado como `requester` — só como `system_admin` — e teria falhado com `403` para a persona que mais usa esse fluxo, porque `/api/documents` excluía `requester` por completo.
 
-A linha temporal da PO é derivada, não fabricada: junta o `createdAt`/`decidedAt` reais do pedido de origem (quando existe `requestId`) com o estado actual da PO — sem tabela de eventos nova, que precisaria de um caminho de escrita para cada transição de estado que este app ainda não tem.
+A linha temporal da PO usada aqui é a real, com escrita própria — ver secção seguinte, "Linha temporal real da PO".
+
+## Linha temporal real da PO
+
+Até aqui, `PurchaseOrderTimelineSheet` mostrava uma linha temporal *derivada*: juntava o `createdAt`/`decidedAt` do pedido de origem (quando existia `requestId`) com o estado actual da PO — sem tabela própria, porque nenhuma rota tinha um caminho de escrita para as transições de estado da PO. Isso já não é verdade: `po_events` (tabela nova) regista um evento real por cada coisa que realmente aconteceu a uma PO, escrito no mesmo momento em que acontece — nunca recalculado a partir de outras tabelas.
+
+Pontos de escrita (`lib/po-events.ts#recordPoEvent`):
+
+- **`criada`** — quando a PO é gerada, tanto a aprovar um pedido (`PATCH /api/requests/:id`) como a adjudicar um tender (`POST /api/tenders/:id/award`); a descrição regista se houve override de risco alto.
+- **`confirmada`** — quando uma recepção é confirmada (`PATCH /api/receipts/:id`) e o campo `receipts.po` (texto livre, sem FK) corresponde mesmo a uma PO real; sem correspondência, não é escrito nenhum evento órfão.
+- **`expediting` / `entregue` / `excepcao` / `excepcao_resolvida`** — pelas transições de estado explícitas em `PATCH /api/purchase-orders/:id` (`ship` / `deliver` / `flag_exception` / `resolve_exception`), cada uma validando que o estado actual da PO faz sentido para a acção pedida (ex.: não é possível `deliver` uma PO que ainda não está `Expediting`). Restrito a `company_admin`/`analyst`/`coe_manager`/`system_admin` — um fornecedor vê a sua PO mas não avança o estado.
+
+`GET /api/purchase-orders/:id` devolve a PO e os seus eventos (ordenados do mais antigo para o mais recente); é o que `PurchaseOrderTimelineSheet` agora consome, mostrando também os botões de transição disponíveis para quem tem permissão.
 
 ## Candidaturas e homologação (o primeiro contacto real com a plataforma)
 

@@ -129,6 +129,24 @@ export const purchaseOrders = pgTable("purchase_orders", {
   riskOverriddenAt: timestamp("risk_overridden_at", { withTimezone: true }),
 });
 
+// Linha temporal real de uma PO — cada linha é um evento que realmente
+// aconteceu (criação, confirmação de recepção, avanço/entrega,
+// excepção), nunca um estado calculado. Substitui a versão anterior
+// (derivada só de requests.created_at/decided_at do pedido de origem,
+// quando existia — sem nenhum registo próprio da PO). user_id nulo é um
+// evento gerado pelo sistema (ex.: criação a partir da aprovação de um
+// pedido), não uma acção de pessoa nenhuma.
+export const poEvents = pgTable("po_events", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  poId: text("po_id")
+    .notNull()
+    .references(() => purchaseOrders.id),
+  type: text("type").notNull(), // criada | confirmada | expediting | entregue | excepcao | excepcao_resolvida
+  description: text("description").notNull(),
+  userId: bigint("user_id", { mode: "number" }).references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+});
+
 // Tender/Sourcing (RFQ) — pedido de cotação a vários fornecedores
 // convidados, com adjudicação a uma proposta que gera a PO. Primeira fase
 // real do pilar Procurement: até agora só existia a emissão de PO a
@@ -201,8 +219,8 @@ export const bids = pgTable(
 // uma PO pontual. O estado "activo"/"terminado" só regista o que uma
 // pessoa decidiu (terminar antecipadamente); "a expirar"/"expirado" nunca
 // são gravados — são sempre calculados a partir de endDate, para nunca
-// ficarem desactualizados (mesmo princípio já usado na linha temporal da
-// PO: derivado, não fabricado).
+// ficarem desactualizados (mesmo princípio de derivar, não fabricar,
+// já usado noutros sítios da app).
 export const contracts = pgTable("contracts", {
   id: text("id").primaryKey(), // "CTR-2026-####"
   title: text("title").notNull(),

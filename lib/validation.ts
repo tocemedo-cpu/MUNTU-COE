@@ -95,6 +95,14 @@ export const exceptionActionSchema = z.object({
   action: z.literal("resolve"),
 });
 
+// Transições reais de estado de uma PO — ver db/schema.ts#poEvents e
+// app/api/purchase-orders/[id]/route.ts. note é opcional: descrição livre
+// para o evento (ex.: motivo da excepção), guardada tal e qual.
+export const poActionSchema = z.object({
+  action: z.enum(["ship", "deliver", "flag_exception", "resolve_exception"]),
+  note: z.string().trim().max(500).optional(),
+});
+
 export const paymentActionSchema = z.object({
   action: z.literal("release"),
 });

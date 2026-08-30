@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { getDb, jsonRequest, uniqueDomain } from "./helpers";
-import { bids, companies, purchaseOrders, suppliers, users } from "@/db/schema";
+import { bids, companies, poEvents, purchaseOrders, suppliers, users } from "@/db/schema";
 import { GET as listTenders, POST as createTender } from "@/app/api/tenders/route";
 import { GET as getTender, PATCH as patchTender } from "@/app/api/tenders/[id]/route";
 import { POST as submitBid } from "@/app/api/tenders/[id]/bids/route";
@@ -309,6 +309,14 @@ describe("POST /api/tenders/:id/award", () => {
 
     const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, awardBody.po.id));
     expect(po.supplierId).toBe(winner.id);
+
+    // Adjudicar regista um evento real na linha temporal da PO — ver
+    // db/schema.ts#poEvents.
+    const events = await db.select().from(poEvents).where(eq(poEvents.poId, po.id));
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("criada");
+    expect(events[0].userId).toBe(buyer.id);
+    expect(events[0].description).toContain(tender.id);
 
     // Um tender já adjudicado não pode voltar a receber propostas.
     const lateBid = await submitBid(

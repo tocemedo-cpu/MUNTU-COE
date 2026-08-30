@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { receipts } from "@/db/schema";
+import { purchaseOrders, receipts } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
+import { recordPoEvent } from "@/lib/po-events";
 import { parseJsonBody, receiptActionSchema } from "@/lib/validation";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -29,6 +30,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     .set({ progress: 100, status: "Confirmada" })
     .where(eq(receipts.id, Number(id)))
     .returning();
+
+  // "po" na recepção é texto livre, sem FK — só regista o evento se
+  // corresponder mesmo a uma PO real (uma recepção sem PO ligada, ex.:
+  // dados semeados soltos, não deve gerar um evento órfão).
+  const [linkedPo] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, existing.po));
+  if (linkedPo) {
+    await recordPoEvent(db, {
+      poId: linkedPo.id,
+      type: "confirmada",
+      description: `Recepção #${existing.id} confirmada — ${existing.description}`,
+      userId: session.userId,
+    });
+  }
 
   return Response.json({ receipt: updated });
 }

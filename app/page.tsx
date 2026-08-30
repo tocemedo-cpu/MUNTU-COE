@@ -92,6 +92,7 @@ type RequestItem = {
 
 type Supplier = { id: number; name: string; category: string; passport: number; risk: string; local: string; status: string; iban: string | null; bic: string | null };
 type PurchaseOrder = { id: string; supplier: string; description: string; value: number; status: string; nextAction: string; supplierId: number | null; requestId: string | null };
+type PoEvent = { id: number; poId: string; type: string; description: string; userId: number | null; createdAt: string };
 type Receipt = { id: number; po: string; description: string; supplier: string; value: number; progress: number; status: string };
 type Invoice = { id: string; supplier: string; po: string; value: number; match: string; status: string; due: string };
 type ExceptionItem = { id: string; title: string; ref: string; owner: string; cause: string; impact: string; resolved: boolean; createdAt: string };
@@ -807,6 +808,18 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
     }
   };
 
+  const advancePo = async (poId: string, action: "ship" | "deliver" | "flag_exception" | "resolve_exception"): Promise<PurchaseOrder | null> => {
+    try {
+      const { purchaseOrder: updated } = await api<{ purchaseOrder: PurchaseOrder }>(`/api/purchase-orders/${poId}`, { method: "PATCH", body: JSON.stringify({ action }) });
+      setPurchaseOrders((items) => items.map((item) => (item.id === poId ? updated : item)));
+      toast.success("Estado da PO actualizado");
+      return updated;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível actualizar a PO");
+      return null;
+    }
+  };
+
   const inviteSupplier = async () => {
     try {
       const { supplier: created } = await api<{ supplier: Supplier }>("/api/suppliers", {
@@ -919,7 +932,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "tenders" && <Tenders user={user} suppliersList={suppliersList} />}
           {view === "contracts" && <Contracts user={user} suppliersList={suppliersList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "catalog" && <Catalog user={user} suppliersList={suppliersList} />}
-          {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} requests={requests} user={user} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} user={user} onAdvancePo={advancePo} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
@@ -1105,46 +1118,104 @@ function SupplierProfile({ supplier, onUpdate }: { supplier: Supplier | undefine
   </>;
 }
 
-function PurchaseOrderTimelineSheet({ po, request, onUploadDocument, onDownloadDocument }: { po: PurchaseOrder; request: RequestItem | undefined; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
-  // Linha temporal real, derivada dos timestamps que já existem — sem
-  // tabela de eventos nova (que precisaria de um caminho de escrita para
-  // cada transição de estado da PO, que este app ainda não tem). Só
-  // mostra o que é verdade: quando o pedido de origem foi submetido e
-  // decidido (se ligado), quando a PO foi criada, e o estado actual.
-  const events: { label: string; when: string }[] = [];
-  if (request) {
-    events.push({ label: `Pedido ${request.id} submetido`, when: request.submitted });
-    if (request.decidedAt) events.push({ label: "Pedido aprovado — PO gerada", when: formatElapsedPt(request.decidedAt) + " atrás" });
-  }
-  events.push({ label: `Estado actual: ${po.status}`, when: po.nextAction ? `Próxima acção: ${po.nextAction}` : "" });
+const PO_EVENT_LABELS: Record<string, string> = {
+  criada: "PO criada",
+  confirmada: "Recepção confirmada",
+  expediting: "Em expediting",
+  entregue: "Entregue",
+  excepcao: "Excepção registada",
+  excepcao_resolvida: "Excepção resolvida",
+};
+
+// Acção disponível -> pré-condição de estado, espelhando exactamente
+// TRANSITIONS em app/api/purchase-orders/[id]/route.ts — só para decidir
+// que botões mostrar; a validação real (e a única que conta) é sempre
+// feita no servidor.
+const PO_NEXT_ACTIONS: { action: "ship" | "deliver" | "flag_exception" | "resolve_exception"; label: string; from: string[] }[] = [
+  { action: "ship", label: "Marcar em expediting", from: ["Confirmado"] },
+  { action: "deliver", label: "Marcar como entregue", from: ["Expediting"] },
+  { action: "flag_exception", label: "Registar excepção", from: ["Confirmado", "Expediting"] },
+  { action: "resolve_exception", label: "Resolver excepção", from: ["Excepção"] },
+];
+
+function PurchaseOrderTimelineSheet({
+  po,
+  canAdvance,
+  onAdvance,
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  po: PurchaseOrder;
+  canAdvance: boolean;
+  onAdvance: (poId: string, action: "ship" | "deliver" | "flag_exception" | "resolve_exception") => Promise<void>;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
+  const [events, setEvents] = useState<PoEvent[] | null>(null);
+  const [advancing, setAdvancing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEvents(null);
+    (async () => {
+      try {
+        const data = await api<{ events: PoEvent[] }>(`/api/purchase-orders/${po.id}`);
+        if (!cancelled) setEvents(data.events);
+      } catch {
+        if (!cancelled) setEvents([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [po.id, po.status]);
+
+  const advance = async (action: "ship" | "deliver" | "flag_exception" | "resolve_exception") => {
+    setAdvancing(true);
+    try {
+      await onAdvance(po.id, action);
+    } finally {
+      setAdvancing(false);
+    }
+  };
+
+  const availableActions = canAdvance ? PO_NEXT_ACTIONS.filter((item) => item.from.includes(po.status)) : [];
 
   return <><SheetHeader><p className="kicker">LINHA TEMPORAL DA PO</p><SheetTitle>{po.id}</SheetTitle><SheetDescription>{po.description}</SheetDescription></SheetHeader><div className="sheet-body">
     <div className="sheet-value"><small>VALOR</small><strong>{money(po.value)}</strong><p>{po.supplier}</p></div>
-    <div className="timeline"><h3>Histórico</h3>{events.map((event, index) => <div key={event.label} className={index < events.length - 1 ? "complete" : "current"}><span>{index < events.length - 1 ? <Check /> : events.length}</span><div><strong>{event.label}</strong><small>{event.when}</small></div></div>)}</div>
+    <div className="sheet-status"><span className={statusClass(po.status)}>{po.status}</span>{po.nextAction && <span>Próxima acção: {po.nextAction}</span>}</div>
+    {availableActions.length > 0 && <div className="header-actions">{availableActions.map((item) => <Button key={item.action} variant="outline" disabled={advancing} onClick={() => advance(item.action)}>{item.label}</Button>)}</div>}
+    <div className="timeline"><h3>Histórico</h3>
+      {events === null && <p className="muted">A carregar histórico…</p>}
+      {events !== null && events.length === 0 && <p className="muted">Sem eventos registados.</p>}
+      {events !== null && events.map((event, index) => <div key={event.id} className={index < events.length - 1 ? "complete" : "current"}><span>{index < events.length - 1 ? <Check /> : events.length}</span><div><strong>{PO_EVENT_LABELS[event.type] || event.type}</strong><small>{event.description} • {formatElapsedPt(event.createdAt)} atrás</small></div></div>)}
+    </div>
     <EntityDocuments entityType="purchase_order" entityId={po.id} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
   </div></>;
 }
 
 function PurchaseOrders({
   purchaseOrders,
-  requests,
   user,
+  onAdvancePo,
   onUploadDocument,
   onDownloadDocument,
 }: {
   purchaseOrders: PurchaseOrder[];
-  requests: RequestItem[];
   user: AuthUser;
+  onAdvancePo: (poId: string, action: "ship" | "deliver" | "flag_exception" | "resolve_exception") => Promise<PurchaseOrder | null>;
   onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
   onDownloadDocument: (doc: DocumentItem) => void;
 }) {
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [exportFormOpen, setExportFormOpen] = useState(false);
   const canExport = user.accessLevel === "company_admin" || user.accessLevel === "system_admin";
+  // Um fornecedor vê a sua própria PO mas não pode avançar o estado — só
+  // quem faz o trabalho de execução (cliente/Muntu) tem os botões, mesmo
+  // conjunto de papéis aceite pelo PATCH no servidor.
+  const canAdvance = user.accessLevel !== "supplier";
   return <><PageHeader kicker="PURCHASE ORDER CONTROL TOWER" title="Ordens de compra" description="Emissão, confirmação, expediting, alterações e entrega controlados ponta-a-ponta." action={canExport ? <Button variant="outline" onClick={() => setExportFormOpen((open) => !open)}><Download /> Exportar mapa</Button> : undefined} />
     {exportFormOpen && <SapExportForm user={user} onExported={() => setExportFormOpen(false)} />}
     <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Fornecedor</TableHead><TableHead>Descrição</TableHead><TableHead>Valor AOA</TableHead><TableHead>Estado</TableHead><TableHead>Próxima acção</TableHead><TableHead /></TableRow></TableHeader><TableBody>{purchaseOrders.map((po) => <TableRow key={po.id}><TableCell><strong>{po.id}</strong></TableCell><TableCell>{po.supplier}</TableCell><TableCell>{po.description}</TableCell><TableCell>{money(po.value)}</TableCell><TableCell><span className={statusClass(po.status)}>{po.status}</span></TableCell><TableCell>{po.nextAction}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(po)} aria-label={`Ver linha temporal de ${po.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
-  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <PurchaseOrderTimelineSheet po={selected} request={requests.find((item) => item.id === selected.requestId)} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <PurchaseOrderTimelineSheet po={selected} canAdvance={canAdvance} onAdvance={async (poId, action) => { const updated = await onAdvancePo(poId, action); if (updated) setSelected(updated); }} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
   </>;
 }
 

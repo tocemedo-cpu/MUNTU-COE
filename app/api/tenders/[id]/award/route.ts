@@ -1,6 +1,6 @@
 import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
-import { bids, purchaseOrders, suppliers, tenders } from "@/db/schema";
+import { bids, poEvents, purchaseOrders, suppliers, tenders } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { checkSupplierRiskBlock } from "@/lib/risk-block";
@@ -80,6 +80,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }
     }
     if (!po) throw new Error("Não foi possível gerar um id de PO único");
+
+    // Inserido directamente com tx (não via lib/po-events.ts#recordPoEvent):
+    // o tipo de tx dentro de db.transaction() é distinto do tipo devolvido
+    // por getDb(), pelo que um helper partilhado tipado para o segundo não
+    // compila aqui — mesmo problema já resolvido para insertTenderWithGeneratedId.
+    await tx.insert(poEvents).values({
+      poId: po.id,
+      type: "criada",
+      description: riskOverriddenByUserId
+        ? `PO criada a partir da adjudicação do tender ${tender.id} — fornecedor de risco alto aprovado com override`
+        : `PO criada a partir da adjudicação do tender ${tender.id}`,
+      userId: session.userId,
+    });
 
     const [updatedTender] = await tx
       .update(tenders)

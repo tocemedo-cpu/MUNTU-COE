@@ -4,6 +4,7 @@ import { purchaseOrders, requests, suppliers } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { classifyPoTier } from "@/lib/billing";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { recordPoEvent } from "@/lib/po-events";
 import { checkSupplierRiskBlock } from "@/lib/risk-block";
 import { parseJsonBody, requestActionSchema } from "@/lib/validation";
 
@@ -69,7 +70,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (approve) {
     const [existingPo] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.requestId, id));
     if (!existingPo) {
-      await insertPurchaseOrderWithGeneratedId(db, {
+      const newPoId = await insertPurchaseOrderWithGeneratedId(db, {
         supplier: existing.supplier,
         description: existing.subject,
         value: existing.value,
@@ -80,6 +81,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         tier: classifyPoTier(existing.type),
         riskOverriddenByUserId,
         riskOverriddenAt: riskOverriddenByUserId ? new Date() : null,
+      });
+      await recordPoEvent(db, {
+        poId: newPoId,
+        type: "criada",
+        description: riskOverriddenByUserId
+          ? `PO criada a partir do pedido ${existing.id} — fornecedor de risco alto aprovado com override`
+          : `PO criada a partir do pedido ${existing.id}`,
+        userId: session.userId,
       });
     }
   }
