@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { documentFiles, documents } from "@/db/schema";
 import { getSession } from "@/lib/authz";
 import { canAccessDocumentEntity } from "@/lib/document-access";
+import { readDocumentBytes } from "@/lib/storage";
 import { contentDispositionHeader } from "@/lib/uploads";
 
 const GENERAL_LIST_ROLES = ["company_admin", "analyst", "coe_manager", "system_admin"];
@@ -30,11 +31,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const [file] = await db.select().from(documentFiles).where(eq(documentFiles.documentId, Number(id)));
   if (!file) return Response.json({ error: "Ficheiro não encontrado" }, { status: 404 });
 
-  return new Response(new Uint8Array(file.content), {
+  const bytes = await readDocumentBytes(file);
+  return new Response(new Uint8Array(bytes), {
     headers: {
       "Content-Type": doc.contentType || "application/octet-stream",
       "Content-Disposition": contentDispositionHeader(doc.name),
-      "Content-Length": String(file.content.length),
+      "Content-Length": String(bytes.length),
     },
   });
 }

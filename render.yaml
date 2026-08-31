@@ -39,6 +39,29 @@ services:
       # (exportação AGT/SAF-T); sem ele, essa rota recusa com 501.
       - key: MUNTU_NIF
         sync: false
+      # Opcionais — Sentry (ver README §Monitorização de erros). Sem
+      # NEXT_PUBLIC_SENTRY_DSN, o SDK fica inerte (nenhum pedido de rede).
+      # SENTRY_ORG/PROJECT/AUTH_TOKEN só são precisos para upload de
+      # source maps no build; sem eles, o build continua normal.
+      - key: NEXT_PUBLIC_SENTRY_DSN
+        sync: false
+      - key: SENTRY_ORG
+        sync: false
+      - key: SENTRY_PROJECT
+        sync: false
+      - key: SENTRY_AUTH_TOKEN
+        sync: false
+      # Opcionais — Supabase Storage para novos documentos (ver README
+      # §Documentos ligados a uma entidade). Sem SUPABASE_URL/
+      # SUPABASE_SERVICE_ROLE_KEY, os uploads continuam a ir para
+      # document_files.content (bytea), como sempre foi.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # Nome do bucket — opcional, "documents" por omissão.
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false
 
   # Os três Cron Jobs abaixo só chamam a rota já existente no serviço web
   # (curl com o segredo partilhado) — nenhum deles corre código próprio.

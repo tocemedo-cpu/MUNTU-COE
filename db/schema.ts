@@ -480,7 +480,15 @@ export const documentFiles = pgTable("document_files", {
   documentId: bigint("document_id", { mode: "number" })
     .primaryKey()
     .references(() => documents.id),
-  content: bytea("content").notNull(),
+  // Exactamente um dos dois fica preenchido, nunca os dois — ver
+  // lib/storage.ts#readDocumentBytes. content (bytea, no Postgres) é o
+  // comportamento original, ainda usado sem SUPABASE_URL/
+  // SUPABASE_SERVICE_ROLE_KEY configuradas; storagePath aponta para um
+  // objecto no bucket do Supabase Storage quando estão. Linhas antigas
+  // ficam sempre em content — não há migração automática, só novos
+  // uploads passam a ir para o Storage.
+  content: bytea("content"),
+  storagePath: text("storage_path"),
 });
 
 // Candidatura de uma empresa ("Operadora") ou fornecedor ("Prestadora") ao

@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -8,4 +9,13 @@ const nextConfig: NextConfig = {
   agentRules: false,
 };
 
-export default nextConfig;
+// Sem SENTRY_AUTH_TOKEN/SENTRY_ORG/SENTRY_PROJECT definidos, isto só
+// embrulha o runtime (para instrumentation.ts funcionar) — não tenta
+// enviar source maps nem release nenhuma para o Sentry, e não falha o
+// build. Mesmo princípio de activação opcional que o resto da app.
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: true,
+});

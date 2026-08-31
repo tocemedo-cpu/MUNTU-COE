@@ -164,6 +164,8 @@ Isto obrigou a abrir `/api/documents` a qualquer sessão válida no `middleware.
 
 A linha temporal da PO usada aqui é a real, com escrita própria — ver secção seguinte, "Linha temporal real da PO".
 
+**Onde ficam os bytes:** `document_files.content` (bytea no Postgres) era, até aqui, o único sítio. Com `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` definidas, um upload novo passa a ir para um bucket do Supabase Storage (`lib/storage.ts`, API REST simples, sem SDK — mesmo padrão do `lib/mailer.ts` para o Brevo) e só `document_files.storage_path` fica preenchido; sem essas variáveis, continua exactamente como antes. Os dois caminhos coexistem por design — `lib/storage.ts#readDocumentBytes` decide qual usar por linha — não há migração automática das linhas antigas para o bucket.
+
 ## Linha temporal real da PO
 
 Até aqui, `PurchaseOrderTimelineSheet` mostrava uma linha temporal *derivada*: juntava o `createdAt`/`decidedAt` do pedido de origem (quando existia `requestId`) com o estado actual da PO — sem tabela própria, porque nenhuma rota tinha um caminho de escrita para as transições de estado da PO. Isso já não é verdade: `po_events` (tabela nova) regista um evento real por cada coisa que realmente aconteceu a uma PO, escrito no mesmo momento em que acontece — nunca recalculado a partir de outras tabelas.
@@ -277,6 +279,14 @@ O wizard de novo pedido já tinha "PO catalogado" como tipo de transacção (tie
 - **Retirar sem apagar** — `PATCH` com `{ active: false }` desactiva um item (nunca apaga, para não perder o histórico de POs que já o referenciaram) — o ecrã **Catálogo** tem um botão "Desactivar"/"Reactivar" para quem cura.
 
 Fica deliberadamente por fazer, para uma ronda futura: usar um item de catálogo directamente no wizard de novo pedido (hoje o wizard só tem um campo de valor livre, sem carrinho de itens) — o catálogo já existe como fonte de preços reais, mas ainda não está ligado a essa UI.
+
+## Monitorização de erros (Sentry)
+
+Antes disto, um erro em produção só era descoberto se alguém reportasse — nada distinguia "o processo está vivo" de "está mesmo a funcionar". `@sentry/nextjs` está instrumentado (`instrumentation.ts`, `instrumentation-client.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `app/global-error.tsx`) em todo o runtime — servidor, edge (`middleware.ts`) e browser.
+
+Mesmo princípio de activação opcional que `BREVO_API_KEY`/`CRON_SECRET`/`MUNTU_NIF`: sem `NEXT_PUBLIC_SENTRY_DSN` definida, o SDK fica inerte (nenhum pedido de rede, nenhum custo) — a app funciona exactamente na mesma. Defina-a (mais `SENTRY_ORG`/`SENTRY_PROJECT`/`SENTRY_AUTH_TOKEN`, opcionais, só para o build conseguir enviar source maps) e a captura liga-se sozinha, sem mudar código nenhum.
+
+Gravação de sessão (Session Replay) está explicitamente desligada (`replaysSessionSampleRate`/`replaysOnErrorSampleRate` a `0`) — este portal mostra facturas, dados de fornecedores e de candidaturas em ecrã, e isso não deve sair daqui por omissão.
 
 ## Rotas de API
 

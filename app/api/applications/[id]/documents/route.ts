@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { applications, documentFiles, documents } from "@/db/schema";
 import { verifyApplicationAccessToken } from "@/lib/application-access";
 import { formatPtDateTime } from "@/lib/format";
+import { isStorageConfigured, storagePathFor, uploadToStorage } from "@/lib/storage";
 import { validateUploadedFile } from "@/lib/uploads";
 
 // Upload de documento pelo próprio candidato (Candidatura -> Documentos),
@@ -55,7 +56,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         entityId: id,
       })
       .returning();
-    await tx.insert(documentFiles).values({ documentId: row.id, content: bytes });
+    if (isStorageConfigured()) {
+      const path = storagePathFor(row.id, file.name);
+      await uploadToStorage(path, bytes, file.type || undefined);
+      await tx.insert(documentFiles).values({ documentId: row.id, storagePath: path });
+    } else {
+      await tx.insert(documentFiles).values({ documentId: row.id, content: bytes });
+    }
     return row;
   });
 

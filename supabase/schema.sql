@@ -320,6 +320,14 @@ create table if not exists public.document_files (
   content bytea not null
 );
 
+-- Exactamente um dos dois fica preenchido, nunca os dois — ver
+-- lib/storage.ts#readDocumentBytes. content é o comportamento original;
+-- storage_path aponta para um objecto no bucket do Supabase Storage
+-- quando SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY estão configuradas.
+-- Linhas antigas ficam sempre em content — sem migração automática.
+alter table public.document_files alter column content drop not null;
+alter table public.document_files add column if not exists storage_path text;
+
 -- Candidatura de uma empresa ou fornecedor ao Centro de Excelência — o
 -- primeiro contacto real com a plataforma, para quem ainda não tem conta
 -- nenhuma. Só a homologação (aprovada -> homologada) cria de facto a

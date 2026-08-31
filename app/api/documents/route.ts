@@ -4,6 +4,7 @@ import { documentFiles, documents, users } from "@/db/schema";
 import { getSession } from "@/lib/authz";
 import { canAccessDocumentEntity, isDocumentEntityType } from "@/lib/document-access";
 import { formatPtDateTime } from "@/lib/format";
+import { isStorageConfigured, storagePathFor, uploadToStorage } from "@/lib/storage";
 import { validateUploadedFile } from "@/lib/uploads";
 
 // Sem middleware.ts a restringir este prefixo (ao contrário da listagem
@@ -120,7 +121,13 @@ export async function POST(request: Request) {
         entityId,
       })
       .returning();
-    await tx.insert(documentFiles).values({ documentId: row.id, content: bytes });
+    if (isStorageConfigured()) {
+      const path = storagePathFor(row.id, file.name);
+      await uploadToStorage(path, bytes, file.type || undefined);
+      await tx.insert(documentFiles).values({ documentId: row.id, storagePath: path });
+    } else {
+      await tx.insert(documentFiles).values({ documentId: row.id, content: bytes });
+    }
     return row;
   });
 

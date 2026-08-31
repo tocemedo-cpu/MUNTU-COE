@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { documentFiles, documents } from "@/db/schema";
 import { APPLICATION_REVIEW_ROLES, verifyApplicationAccessToken } from "@/lib/application-access";
 import { getOptionalSession } from "@/lib/authz";
+import { readDocumentBytes } from "@/lib/storage";
 import { contentDispositionHeader } from "@/lib/uploads";
 
 // Download de um documento da própria candidatura — pelo candidato (token,
@@ -34,11 +35,12 @@ export async function GET(
   const [file] = await db.select().from(documentFiles).where(eq(documentFiles.documentId, doc.id));
   if (!file) return Response.json({ error: "Ficheiro não encontrado" }, { status: 404 });
 
-  return new Response(new Uint8Array(file.content), {
+  const bytes = await readDocumentBytes(file);
+  return new Response(new Uint8Array(bytes), {
     headers: {
       "Content-Type": doc.contentType || "application/octet-stream",
       "Content-Disposition": contentDispositionHeader(doc.name),
-      "Content-Length": String(file.content.length),
+      "Content-Length": String(bytes.length),
     },
   });
 }

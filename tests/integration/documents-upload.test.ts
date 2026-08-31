@@ -37,7 +37,12 @@ describe("Real document upload/download (bytea round trip)", () => {
     // The bytes actually landed in document_files, not just the metadata row.
     const db = getDb();
     const [fileRow] = await db.select().from(documentFiles).where(eq(documentFiles.documentId, uploadBody.document.id));
-    expect(Buffer.from(fileRow.content).toString("utf-8")).toBe(content);
+    // Sem SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY nos testes, o upload usa
+    // sempre o caminho bytea (ver lib/storage.ts#isStorageConfigured) —
+    // content nunca é nulo neste cenário, storagePath sim.
+    expect(fileRow.storagePath).toBeNull();
+    expect(fileRow.content).not.toBeNull();
+    expect(Buffer.from(fileRow.content!).toString("utf-8")).toBe(content);
 
     const downloadResponse = await downloadDocument(
       jsonRequest(`http://localhost/api/documents/${uploadBody.document.id}/download`, { method: "GET", session: { userId: 1, accessLevel: "system_admin" } }),
