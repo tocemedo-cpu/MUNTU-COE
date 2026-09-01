@@ -87,6 +87,19 @@ export const supplierSelfUpdateSchema = z.object({
   local: z.string().trim().max(20).optional(),
 });
 
+// Edição por um company_admin (cliente): pode mexer na conta bancária do
+// fornecedor com quem trabalha (é o único ecrã que expõe isto, via
+// SupplierPassportSheet) e nos mesmos campos auto-declaráveis do próprio
+// fornecedor — mas nunca em passport/risco/estado, que continuam a ser só
+// avaliação interna da Muntu (analyst/coe_manager/system_admin), nunca do
+// cliente sobre o fornecedor de outra empresa.
+export const supplierCompanyAdminUpdateSchema = z.object({
+  category: z.string().trim().max(120).optional(),
+  local: z.string().trim().max(20).optional(),
+  iban: z.string().trim().max(34).optional(),
+  bic: z.string().trim().max(11).optional(),
+});
+
 export const receiptActionSchema = z.object({
   action: z.literal("confirm"),
 });

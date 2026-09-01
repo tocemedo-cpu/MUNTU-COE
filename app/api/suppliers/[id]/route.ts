@@ -2,17 +2,23 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { suppliers } from "@/db/schema";
 import { getSession } from "@/lib/authz";
-import { parseJsonBody, supplierSelfUpdateSchema, supplierUpdateSchema } from "@/lib/validation";
+import { parseJsonBody, supplierCompanyAdminUpdateSchema, supplierSelfUpdateSchema, supplierUpdateSchema } from "@/lib/validation";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = getSession(request);
   const supplierId = Number(id);
 
-  const isInternal = ["company_admin", "analyst", "coe_manager", "system_admin"].includes(session.accessLevel);
+  // Passport/risco/estado são avaliação interna da Muntu (analyst/
+  // coe_manager/system_admin) — um company_admin não avalia o fornecedor
+  // de outra empresa, só gere a conta bancária dele para os seus próprios
+  // pagamentos (mesmo âmbito do único formulário que a UI lhe mostra,
+  // SupplierPassportSheet#onUpdateBankDetails).
+  const isMuntuInternal = ["analyst", "coe_manager", "system_admin"].includes(session.accessLevel);
+  const isCompanyAdmin = session.accessLevel === "company_admin";
   const isOwnProfile = session.accessLevel === "supplier" && session.supplierId === supplierId;
 
-  if (!isInternal && !isOwnProfile) {
+  if (!isMuntuInternal && !isCompanyAdmin && !isOwnProfile) {
     return Response.json({ error: "Sem permissão para editar este fornecedor." }, { status: 403 });
   }
 
@@ -20,7 +26,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const [existing] = await db.select().from(suppliers).where(eq(suppliers.id, supplierId));
   if (!existing) return Response.json({ error: "Fornecedor não encontrado" }, { status: 404 });
 
-  const parsed = await parseJsonBody(request, isInternal ? supplierUpdateSchema : supplierSelfUpdateSchema);
+  const schema = isMuntuInternal ? supplierUpdateSchema : isCompanyAdmin ? supplierCompanyAdminUpdateSchema : supplierSelfUpdateSchema;
+  const parsed = await parseJsonBody(request, schema);
   if (!parsed.success) return parsed.response;
 
   // Um corpo só com campos que este schema não reconhece (ex.: um

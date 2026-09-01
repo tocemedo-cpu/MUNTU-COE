@@ -18,6 +18,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (session.accessLevel === "requester" && row.ownerUserId !== session.userId) {
     return Response.json({ error: "Sem permissão para aceder a este pedido." }, { status: 403 });
   }
+  // Mesmo motivo do GET da lista (app/api/requests/route.ts): analyst e
+  // supplier não têm noção de "dono" de pedido nenhuma — sem esta guarda,
+  // um id adivinhado/enumerado devolvia o pedido de qualquer empresa.
+  if (session.accessLevel === "analyst" || session.accessLevel === "supplier") {
+    return Response.json({ error: "Sem permissão para aceder a este pedido." }, { status: 403 });
+  }
 
   return Response.json({ request: row });
 }

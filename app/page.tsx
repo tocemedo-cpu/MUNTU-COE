@@ -676,6 +676,11 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [form, setForm] = useState({ tower: "Requisition-to-PO", type: "PO standard", subject: "", costCenter: "", supplier: "", value: "", due: "", approver: "", priority: "Média", notes: "" });
 
   const isRequester = user.accessLevel === "requester";
+  // analyst/supplier não têm noção nenhuma de "dono" de pedido (ver
+  // app/api/requests/route.ts) — a rota devolve sempre {requests: []} para
+  // estes dois níveis, e nenhum ecrã seu chega a mostrar esta lista, por
+  // isso nem vale a pena chamar a API.
+  const skipsRequestsFetch = user.accessLevel === "analyst" || user.accessLevel === "supplier";
 
   useEffect(() => {
     let cancelled = false;
@@ -685,7 +690,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         // execução P2P — nem sequer as chama, para não rebentar o
         // carregamento do portal com um 403 dentro do Promise.all.
         const [r, s, ap] = await Promise.all([
-          api<{ requests: RequestItem[] }>("/api/requests"),
+          skipsRequestsFetch ? Promise.resolve({ requests: [] }) : api<{ requests: RequestItem[] }>("/api/requests"),
           api<{ suppliers: Supplier[] }>("/api/suppliers"),
           api<{ approvers: Approver[] }>("/api/approvers"),
         ]);
@@ -695,13 +700,20 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         setApprovers(ap.approvers);
 
         if (!isRequester) {
+          const isSupplier = user.accessLevel === "supplier";
+          // Um fornecedor está bloqueado no servidor para excepções,
+          // pagamentos e o Repositório geral (ROUTE_ACCESS em
+          // middleware.ts e GENERAL_LIST_ROLES em app/api/documents/
+          // route.ts nunca o incluem — só vê os documentos ligados ao seu
+          // próprio Supplier Passport, por entidade) — nem sequer as
+          // chama, mesmo motivo do "isRequester" acima.
           const [po, rc, inv, exc, pay, doc] = await Promise.all([
             api<{ purchaseOrders: PurchaseOrder[] }>("/api/purchase-orders"),
             api<{ receipts: Receipt[] }>("/api/receipts"),
             api<{ invoices: Invoice[] }>("/api/invoices"),
-            api<{ exceptions: ExceptionItem[] }>("/api/exceptions"),
-            api<{ paymentBatches: PaymentBatch[] }>("/api/payments"),
-            api<{ documents: DocumentItem[] }>("/api/documents"),
+            isSupplier ? Promise.resolve({ exceptions: [] }) : api<{ exceptions: ExceptionItem[] }>("/api/exceptions"),
+            isSupplier ? Promise.resolve({ paymentBatches: [] }) : api<{ paymentBatches: PaymentBatch[] }>("/api/payments"),
+            isSupplier ? Promise.resolve({ documents: [] }) : api<{ documents: DocumentItem[] }>("/api/documents"),
           ]);
           if (cancelled) return;
           setPurchaseOrders(po.purchaseOrders);
