@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { sendPasswordResetEmail } from "@/lib/mailer";
 import { clientIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
+import { publicOrigin } from "@/lib/request-origin";
 import { generateJti, signPayload } from "@/lib/session";
 import { parseJsonBody, passwordResetRequestSchema } from "@/lib/validation";
 
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   // mesma nos dois casos — nunca revela se um e-mail tem conta ou não.
   if (user?.password) {
     const token = await signPayload({ userId: user.id, purpose: "password_reset", jti: generateJti() }, RESET_TOKEN_TTL_SECONDS);
-    const origin = new URL(request.url).origin;
+    const origin = publicOrigin(request);
     const resetUrl = `${origin}/?reset_token=${encodeURIComponent(token)}#login`;
     try {
       await sendPasswordResetEmail(user.email, resetUrl);

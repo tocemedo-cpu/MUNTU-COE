@@ -2,6 +2,7 @@ import { eq, inArray, isNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { requests, supportTickets, users } from "@/db/schema";
 import { sendSlaAlertEmail, sendSlaEscalationEmail } from "@/lib/mailer";
+import { publicOrigin } from "@/lib/request-origin";
 import { isRequestSlaBreached, shouldEscalateRequest } from "@/lib/requests-sla";
 import type { SupportStatus } from "@/lib/support";
 import { isSlaBreached, shouldEscalateTicket } from "@/lib/support";
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Não autorizado" }, { status: 401 });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const portalUrl = `${origin}/`;
   const db = getDb();
   const now = new Date();

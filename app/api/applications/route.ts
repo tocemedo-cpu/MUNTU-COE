@@ -6,6 +6,7 @@ import { getOptionalSession } from "@/lib/authz";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { sendApplicationReceivedEmail } from "@/lib/mailer";
 import { clientIp, isRateLimited, rateLimitResponse } from "@/lib/rate-limit";
+import { publicOrigin } from "@/lib/request-origin";
 import { signPayload } from "@/lib/session";
 import { applicationCreateSchema, parseJsonBody } from "@/lib/validation";
 
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
     APPLICATION_TOKEN_TTL_SECONDS
   );
 
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const statusUrl = `${origin}/?application_token=${encodeURIComponent(token)}&application_id=${encodeURIComponent(created.id)}#candidatura`;
   try {
     await sendApplicationReceivedEmail(created.contactEmail, created.id, statusUrl);

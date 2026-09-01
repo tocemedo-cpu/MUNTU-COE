@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { getSession } from "@/lib/authz";
+import { publicOrigin } from "@/lib/request-origin";
 import { DEFAULT_ROLE_LABEL, provisionUserWithoutPassword } from "@/lib/user-provisioning";
 import { companyUserInviteSchema, parseJsonBody } from "@/lib/validation";
 
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     return Response.json({ error: `Já existe um utilizador com o e-mail ${email}.` }, { status: 409 });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const newUser = await provisionUserWithoutPassword(
     db,
     {

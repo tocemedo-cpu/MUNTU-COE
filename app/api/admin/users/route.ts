@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { companies, suppliers, users } from "@/db/schema";
+import { publicOrigin } from "@/lib/request-origin";
 import { adminUserCreateSchema, parseJsonBody } from "@/lib/validation";
 import { DEFAULT_ROLE_LABEL, provisionUserWithoutPassword } from "@/lib/user-provisioning";
 
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     if (!supplier) return Response.json({ error: "Fornecedor não encontrado" }, { status: 400 });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const newUser = await provisionUserWithoutPassword(
     db,
     {

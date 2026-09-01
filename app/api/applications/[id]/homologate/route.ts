@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { applications, companies, suppliers, users } from "@/db/schema";
 import { APPLICATION_REVIEW_ROLES } from "@/lib/application-access";
 import { getOptionalSession } from "@/lib/authz";
+import { publicOrigin } from "@/lib/request-origin";
 import { provisionUserWithoutPassword } from "@/lib/user-provisioning";
 
 // Homologação (Aprovada -> Homologação -> Acesso Muntu): a única acção que
@@ -30,7 +31,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: `Já existe um utilizador com o e-mail ${application.contactEmail}.` }, { status: 409 });
   }
 
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   let createdCompanyId: number | null = null;
   let createdSupplierId: number | null = null;
   let createdUserId: number;
