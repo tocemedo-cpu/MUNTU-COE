@@ -8,6 +8,16 @@ envVarGroups:
       - key: CRON_SECRET
         generateValue: true
 
+databases:
+  # Base de dados só para o ambiente de teste (staging) — nunca a de
+  # produção. Plano free do Postgres do Render expira ao fim de 30 dias;
+  # antes disso, ou se recria (perde os dados, aceitável para staging) ou
+  # se muda para um plano pago no dashboard.
+  - name: muntu-coe-staging-db
+    plan: free
+    databaseName: muntu_coe_staging
+    user: muntu_coe_staging
+
 services:
   - type: web
     name: muntu-coe-portal
@@ -60,6 +70,59 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       # Nome do bucket — opcional, "documents" por omissão.
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false
+
+  # Ambiente de teste — mesmo código, base de dados própria
+  # (muntu-coe-staging-db, nunca a de produção), branch "staging" em vez
+  # de "main". Fluxo: alterações vão primeiro para "staging", testam-se
+  # aqui à vontade (incluindo mudanças de RBAC/permissões, que mudam
+  # comportamento imediatamente para contas reais em produção), só depois
+  # se faz merge para "main". Sem Cron Jobs próprios de propósito — ver
+  # nota abaixo.
+  - type: web
+    name: muntu-coe-staging
+    runtime: node
+    plan: free
+    branch: staging
+    buildCommand: npm ci && npm run db:apply-schema && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: muntu-coe-staging-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      # Gerado de propósito, mas sem nenhum Cron Job de staging a usá-lo —
+      # dá para testar /api/admin/*/run à mão (curl com este segredo) sem
+      # ter de pagar por Cron Jobs extra só para o ambiente de teste.
+      - key: CRON_SECRET
+        generateValue: true
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_FROM_EMAIL
+        sync: false
+      - key: MUNTU_NIF
+        sync: false
+      # Nunca aponte estas três para o mesmo projecto Sentry da produção —
+      # ficaria com ruído de testes misturado com erros reais. Deixe em
+      # branco (SDK fica inerte) ou crie um projecto Sentry à parte.
+      - key: NEXT_PUBLIC_SENTRY_DSN
+        sync: false
+      - key: SENTRY_ORG
+        sync: false
+      - key: SENTRY_PROJECT
+        sync: false
+      - key: SENTRY_AUTH_TOKEN
+        sync: false
+      # Mesmo aviso: nunca aponte para o bucket de Storage da produção.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: SUPABASE_STORAGE_BUCKET
         sync: false
 

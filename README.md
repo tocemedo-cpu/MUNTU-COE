@@ -393,6 +393,22 @@ Alternativa sem Blueprint: criar manualmente um **Web Service** em Render → li
 
 **Agendamento externo:** o Web Service por si só não corre `POST /api/admin/billing/generate-monthly`, `POST /api/admin/sla-alerts/run` nem `POST /api/admin/payment-release/run` — precisam de ser chamadas periodicamente com o header `x-cron-secret: <CRON_SECRET>`. `render.yaml` já declara três **Render Cron Jobs** para isto (`muntu-coe-sla-alerts` a cada 15 minutos, `muntu-coe-payment-release` diário às 06:00 UTC, `muntu-coe-billing-monthly` no dia 1 de cada mês às 03:00 UTC — cada um só um `curl` contra a rota já existente, sem código próprio), com `CRON_SECRET` partilhado com o Web Service através de um `envVarGroups` no mesmo Blueprint (garante que os quatro serviços usam sempre o mesmo valor). **Cron Jobs não existem no plano free do Render** — ao sincronizar o Blueprint, escolha um plano pago para os três antes de confirmar (o `render.yaml` deixa `plan` por definir de propósito nesses três serviços, para o dashboard perguntar). Sem confirmar isso no dashboard, o Blueprint falha a sincronizar — este ficheiro não consegue escolher um plano pago por si, é uma decisão de conta/orçamento. Alternativa sem Render Cron Jobs: qualquer agendador externo (GitHub Actions, cron-job.org, ...) a chamar as mesmas três rotas com o mesmo header.
 
+## Ambiente de teste (staging)
+
+Mesmo `render.yaml`, um segundo Web Service (`muntu-coe-staging`), branch `staging` em vez de `main`, base de dados própria (`muntu-coe-staging-db`, Postgres gerido pelo Render — **nunca** a de produção). Existe para testar alterações de verdade (sobretudo mudanças de permissões/RBAC, que mudam o comportamento imediatamente para contas reais em produção assim que o deploy acontece) antes de irem para `main`.
+
+**Fluxo a partir de agora:** desenvolvimento vai primeiro para a branch `staging` → o Render faz deploy automático dessa branch para `muntu-coe-staging` → testa-se lá (idealmente com as contas de demonstração, `db:seed`) → só depois de confirmado, faz-se `git merge staging` (ou equivalente) para `main`, que despoleta o deploy de produção.
+
+**Para activar (uma vez, no dashboard do Render):**
+1. Sincronizar o Blueprint outra vez (**Blueprints → o seu Blueprint → Sync**, ou criar um novo a partir deste `render.yaml`) — o Render propõe o Web Service `muntu-coe-staging` e a base de dados `muntu-coe-staging-db` novos, a par dos que já existem.
+2. Confirmar a criação dos dois.
+3. Uma vez criado, `DATABASE_URL` do serviço de staging já vem ligada automaticamente à sua própria base de dados (`fromDatabase` no `render.yaml`) — não precisa de colar nada à mão, ao contrário do Web Service de produção.
+4. Opcional: correr `DATABASE_URL="<connection string do staging>" npm run db:seed` para ter as contas de demonstração (ver tabela em §Perfis de demonstração) disponíveis em staging.
+
+**Nunca aponte staging para os mesmos `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`NEXT_PUBLIC_SENTRY_DSN` da produção** — ficaria com dados de teste misturados no bucket de Storage ou ruído de testes no Sentry de produção. Deixe essas variáveis por definir em staging (funcionam em modo inerte/fallback, como já documentado acima) ou crie recursos próprios só para testes.
+
+O plano free do Postgres do Render expira ao fim de 30 dias — para um ambiente de teste que se quer manter, recrie a base de dados nessa altura (perde os dados de teste, sem problema) ou mude para um plano pago antes de expirar.
+
 ## Base de dados
 
 O schema fica definido em dois sítios sincronizados:
