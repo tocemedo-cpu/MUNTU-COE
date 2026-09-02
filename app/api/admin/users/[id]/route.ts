@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
+import { recordAuditEvent } from "@/lib/audit";
+import { getSession } from "@/lib/authz";
 import { parseJsonBody, userAccessUpdateSchema } from "@/lib/validation";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -21,6 +23,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     })
     .where(eq(users.id, Number(id)))
     .returning();
+
+  // IAM — mudar o nível de acesso de alguém é potencialmente escalar
+  // privilégios, sempre registado (ver README §Personas e permissões).
+  const session = getSession(request);
+  await recordAuditEvent(db, {
+    actorUserId: session.userId,
+    action: "user.access_change",
+    entityType: "user",
+    entityId: id,
+    before: { accessLevel: existing.accessLevel, companyId: existing.companyId, supplierId: existing.supplierId },
+    after: { accessLevel: updated.accessLevel, companyId: updated.companyId, supplierId: updated.supplierId },
+  });
 
   const { password: _password, ...safeUser } = updated;
   return Response.json({ user: safeUser });

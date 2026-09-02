@@ -2,8 +2,10 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { applications, companies, suppliers, users } from "@/db/schema";
 import { APPLICATION_REVIEW_ROLES } from "@/lib/application-access";
+import { recordAuditEvent } from "@/lib/audit";
 import { getOptionalSession } from "@/lib/authz";
 import { publicOrigin } from "@/lib/request-origin";
+import { assertDifferentActor } from "@/lib/sod";
 import { provisionUserWithoutPassword } from "@/lib/user-provisioning";
 
 // Homologação (Aprovada -> Homologação -> Acesso Muntu): a única acção que
@@ -25,6 +27,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (application.status !== "aprovada") {
     return Response.json({ error: "Só é possível homologar uma candidatura já aprovada." }, { status: 400 });
   }
+  // Candidatura de empresa cliente continua governance pura do COE
+  // Manager; supplier_governance só controla o lado fornecedor (ver
+  // README §Personas e permissões).
+  if (application.kind === "empresa" && session.accessLevel !== "coe_manager") {
+    return Response.json({ error: "Só o COE Manager pode homologar uma candidatura de empresa." }, { status: 403 });
+  }
+  // Segregação de funções: quem aprovou (moveu para "aprovada") não pode
+  // ser quem homologa — duas pessoas diferentes têm de fechar o círculo.
+  const sodError = assertDifferentActor(session.userId, application.reviewedByUserId, "Quem aprovou esta candidatura não pode ser quem a homologa.");
+  if (sodError) return sodError;
 
   const [existingUser] = await db.select().from(users).where(eq(users.email, application.contactEmail));
   if (existingUser) {
@@ -105,6 +117,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     })
     .where(eq(applications.id, id))
     .returning();
+
+  await recordAuditEvent(db, {
+    actorUserId: session.userId,
+    action: "application.homologate",
+    entityType: "application",
+    entityId: id,
+    after: { createdCompanyId, createdSupplierId, createdUserId },
+  });
 
   return Response.json({ application: updated });
 }

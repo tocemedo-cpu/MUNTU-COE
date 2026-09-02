@@ -1,9 +1,11 @@
 import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
 import { bids, poEvents, purchaseOrders, suppliers, tenders } from "@/db/schema";
+import { recordAuditEvent } from "@/lib/audit";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { checkSupplierRiskBlock } from "@/lib/risk-block";
+import { assertDifferentActor } from "@/lib/sod";
 import { parseJsonBody, tenderAwardSchema } from "@/lib/validation";
 
 // Adjudica uma proposta: marca-a vencedora, rejeita as restantes, fecha o
@@ -11,9 +13,12 @@ import { parseJsonBody, tenderAwardSchema } from "@/lib/validation";
 // sem PO (ou uma PO sem tender fechado) deixaria o estado inconsistente.
 // Tier fixo em "complexo": uma RFQ concorrencial já implica mais esforço
 // da Muntu do que uma PO standard assistida (não há "Tipo de transacção"
-// nenhum para classificar, ao contrário de um pedido normal).
+// nenhum para classificar, ao contrário de um pedido normal). Adjudicação
+// é procurement, fora do system_admin desde o redesenho de RBAC (ver
+// README §Personas e permissões); technical_evaluator nunca entra aqui —
+// avalia tecnicamente, não decide comercialmente.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;
@@ -45,6 +50,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: riskCheck.reason, riskBlock: true, canOverride: riskCheck.canOverride }, { status: 409 });
   }
   const riskOverriddenByUserId = parsed.data.overrideRisk ? session.userId : null;
+
+  // Segregação de funções: quem abriu este tender não pode ser também
+  // quem decide ultrapassar o bloqueio de risco alto sobre ele.
+  if (riskOverriddenByUserId) {
+    const sodError = assertDifferentActor(session.userId, tender.createdByUserId, "Quem abriu este tender não pode ser quem aprova o override de risco alto.");
+    if (sodError) return sodError;
+  }
 
   const result = await db.transaction(async (tx) => {
     await tx.update(bids).set({ status: "vencedora" }).where(eq(bids.id, winningBid.id));
@@ -101,6 +113,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .returning();
 
     return { tender: updatedTender, po };
+  });
+
+  await recordAuditEvent(db, {
+    actorUserId: session.userId,
+    action: "tender.award",
+    entityType: "tender",
+    entityId: id,
+    after: { awardedBidId: winningBid.id, awardedPoId: result.po.id, supplierId: supplier.id },
+    metadata: riskOverriddenByUserId ? { riskOverride: true } : undefined,
   });
 
   return Response.json(result, { status: 201 });

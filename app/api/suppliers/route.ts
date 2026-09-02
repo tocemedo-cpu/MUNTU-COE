@@ -24,8 +24,10 @@ export async function GET(request: Request) {
   return Response.json({ suppliers: rows });
 }
 
+// Procurement/vendor governance, fora do system_admin desde o redesenho
+// de RBAC (ver README §Personas e permissões).
 export async function POST(request: Request) {
-  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "supplier_governance"]);
   if (forbidden) return forbidden;
 
   const db = getDb();

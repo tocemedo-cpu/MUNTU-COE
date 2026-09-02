@@ -20,10 +20,15 @@ export async function GET(request: Request) {
     return Response.json({ receipts: rows });
   }
 
+  // consignee é escopado à própria empresa, mesma regra de company_admin —
+  // sem isto, caía no "senão" abaixo e via recepções de todas as empresas.
+  const isCompanyScoped = session.accessLevel === "company_admin" || session.accessLevel === "consignee";
   const rows =
-    session.accessLevel === "company_admin" && session.companyId != null
+    isCompanyScoped && session.companyId != null
       ? await db.select().from(receipts).where(eq(receipts.companyId, session.companyId)).orderBy(desc(receipts.id)).limit(limit)
-      : await db.select().from(receipts).orderBy(desc(receipts.id)).limit(limit);
+      : isCompanyScoped
+        ? []
+        : await db.select().from(receipts).orderBy(desc(receipts.id)).limit(limit);
 
   return Response.json({ receipts: rows });
 }

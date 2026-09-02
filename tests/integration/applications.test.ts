@@ -17,14 +17,14 @@ function requestWithForm(url: string, form: FormData) {
 // revisão bem-sucedida grava mesmo este id, por isso precisa de apontar
 // para uma linha real (mesma classe de bug já corrigida em
 // document-access.test.ts com fake ids 42/777).
-async function makeReviewer(accessLevel: "coe_manager" | "system_admin" = "coe_manager") {
+async function makeReviewer(accessLevel: "coe_manager" | "supplier_governance" = "coe_manager") {
   const db = getDb();
   const [user] = await db
     .insert(users)
     .values({
       name: `Revisor ${Date.now()}-${Math.random()}`,
       email: `reviewer-${Date.now()}-${Math.random()}@example.com`,
-      role: accessLevel === "system_admin" ? "System Admin" : "COE Manager",
+      role: accessLevel === "supplier_governance" ? "Governance de Fornecedores" : "COE Manager",
       initials: "RV",
       accessLevel,
     })
@@ -125,7 +125,7 @@ describe("GET /api/applications/:id (mixed access)", () => {
     const { body } = await submitApplication("empresa");
     const id = body.application.id;
     const response = await getApplication(
-      jsonRequest(`http://localhost/api/applications/${id}`, { method: "GET", session: { userId: 1, accessLevel: "system_admin" } }),
+      jsonRequest(`http://localhost/api/applications/${id}`, { method: "GET", session: { userId: 1, accessLevel: "coe_manager" } }),
       { params: Promise.resolve({ id }) }
     );
     expect(response.status).toBe(200);
@@ -235,7 +235,7 @@ describe("GET /api/applications/:id/documents/:documentId/download", () => {
     const reviewer = await downloadApplicationDocument(
       jsonRequest(`http://localhost/api/applications/${appA.application.id}/documents/${documentId}/download`, {
         method: "GET",
-        session: { userId: 1, accessLevel: "system_admin" },
+        session: { userId: 1, accessLevel: "coe_manager" },
       }),
       { params: Promise.resolve({ id: appA.application.id, documentId }) }
     );
@@ -250,11 +250,11 @@ describe("GET /api/applications/:id/documents/:documentId/download", () => {
 });
 
 describe("PATCH /api/applications/:id (assignment)", () => {
-  it("assigns to a real coe_manager/system_admin, then unassigns", async () => {
+  it("assigns to a real coe_manager/supplier_governance, then unassigns", async () => {
     const { body } = await submitApplication("empresa");
     const id = body.application.id;
     const actor = await makeReviewer("coe_manager");
-    const assignee = await makeReviewer("system_admin");
+    const assignee = await makeReviewer("supplier_governance");
 
     const assigned = await reviewApplication(
       jsonRequest(`http://localhost/api/applications/${id}`, {
@@ -317,6 +317,11 @@ describe("POST /api/applications/:id/homologate", () => {
     const { body, email } = await submitApplication("empresa", { companyName: `Homolog Co ${Date.now()}` });
     const id = body.application.id;
     const reviewer = await makeReviewer("coe_manager");
+    // Segregação de funções: quem homologa não pode ser quem aprovou —
+    // ver lib/sod.ts#assertDifferentActor. Um segundo coe_manager real
+    // fecha o ciclo aqui; o bloqueio em si tem o seu próprio teste
+    // dedicado mais abaixo.
+    const secondReviewer = await makeReviewer("coe_manager");
 
     const tooEarly = await homologateApplication(
       jsonRequest(`http://localhost/api/applications/${id}/homologate`, { method: "POST", session: { userId: reviewer.id, accessLevel: "coe_manager" } }),
@@ -334,7 +339,7 @@ describe("POST /api/applications/:id/homologate", () => {
     );
 
     const homologated = await homologateApplication(
-      jsonRequest(`http://localhost/api/applications/${id}/homologate`, { method: "POST", session: { userId: reviewer.id, accessLevel: "coe_manager" } }),
+      jsonRequest(`http://localhost/api/applications/${id}/homologate`, { method: "POST", session: { userId: secondReviewer.id, accessLevel: "coe_manager" } }),
       { params: Promise.resolve({ id }) }
     );
     expect(homologated.status).toBe(200);
@@ -361,20 +366,23 @@ describe("POST /api/applications/:id/homologate", () => {
     expect(again.status).toBe(400);
   });
 
-  it("creates a real supplier + supplier user for a fornecedor application", async () => {
+  it("creates a real supplier + supplier user for a fornecedor application — reviewed by coe_manager, homologated by supplier_governance", async () => {
     const { body, email } = await submitApplication("fornecedor", { companyName: `Homolog Fornecedor ${Date.now()}` });
     const id = body.application.id;
-    const reviewer = await makeReviewer("system_admin");
+    const reviewer = await makeReviewer("coe_manager");
+    // supplier_governance só controla candidaturas de fornecedor (nunca
+    // de empresa) — homologa aqui, actor diferente do reviewer (SoD).
+    const supplierGovernance = await makeReviewer("supplier_governance");
     await reviewApplication(
-      jsonRequest(`http://localhost/api/applications/${id}`, { method: "PATCH", session: { userId: reviewer.id, accessLevel: "system_admin" }, body: { status: "em_avaliacao" } }),
+      jsonRequest(`http://localhost/api/applications/${id}`, { method: "PATCH", session: { userId: reviewer.id, accessLevel: "coe_manager" }, body: { status: "em_avaliacao" } }),
       { params: Promise.resolve({ id }) }
     );
     await reviewApplication(
-      jsonRequest(`http://localhost/api/applications/${id}`, { method: "PATCH", session: { userId: reviewer.id, accessLevel: "system_admin" }, body: { status: "aprovada" } }),
+      jsonRequest(`http://localhost/api/applications/${id}`, { method: "PATCH", session: { userId: reviewer.id, accessLevel: "coe_manager" }, body: { status: "aprovada" } }),
       { params: Promise.resolve({ id }) }
     );
     const homologated = await homologateApplication(
-      jsonRequest(`http://localhost/api/applications/${id}/homologate`, { method: "POST", session: { userId: reviewer.id, accessLevel: "system_admin" } }),
+      jsonRequest(`http://localhost/api/applications/${id}/homologate`, { method: "POST", session: { userId: supplierGovernance.id, accessLevel: "supplier_governance" } }),
       { params: Promise.resolve({ id }) }
     );
     expect(homologated.status).toBe(200);
@@ -392,6 +400,10 @@ describe("POST /api/applications/:id/homologate", () => {
     const [company] = await db.insert(companies).values({ name: "Empresa Existente", domain: uniqueDomain("app-clash") }).returning();
     await db.insert(users).values({ name: "Já Existe", email: clashEmail, role: "Requisitante", initials: "JE", companyId: company.id, accessLevel: "requester" });
     const reviewer = await makeReviewer("coe_manager");
+    // Actor diferente do reviewer, para o 409 esperado ser mesmo o do
+    // clash de e-mail (verificado depois da guarda de SoD na rota) — não
+    // um 409 por SoD a passar despercebido como se fosse o mesmo erro.
+    const secondReviewer = await makeReviewer("coe_manager");
 
     const { body } = await submitApplication("empresa", { contactEmail: clashEmail });
     const id = body.application.id;
@@ -404,7 +416,7 @@ describe("POST /api/applications/:id/homologate", () => {
       { params: Promise.resolve({ id }) }
     );
     const homologated = await homologateApplication(
-      jsonRequest(`http://localhost/api/applications/${id}/homologate`, { method: "POST", session: { userId: reviewer.id, accessLevel: "coe_manager" } }),
+      jsonRequest(`http://localhost/api/applications/${id}/homologate`, { method: "POST", session: { userId: secondReviewer.id, accessLevel: "coe_manager" } }),
       { params: Promise.resolve({ id }) }
     );
     expect(homologated.status).toBe(409);

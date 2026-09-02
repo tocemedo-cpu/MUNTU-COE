@@ -425,14 +425,17 @@ describe("POST /api/tenders/:id/award — bloqueio por risco alto", () => {
     expect(unchangedBid.status).toBe("submetida");
   });
 
-  it("lets system_admin through with overrideRisk, marking the resulting PO as overridden", async () => {
+  it("lets coe_manager through with overrideRisk, marking the resulting PO as overridden", async () => {
     const company = await makeCompany();
     const buyer = await makeBuyer(company.id);
     const db = getDb();
     const [riskySupplier] = await db.insert(suppliers).values({ name: `Fornecedor Risco Alto B ${Date.now()}`, category: "Geral", risk: "Alto" }).returning();
-    const [admin] = await db
+    // Override de risco alto é só coe_manager desde o redesenho de RBAC
+    // (ver README §Personas e permissões) — system_admin já não passa
+    // nem no forbidUnless da própria rota de adjudicação.
+    const [manager] = await db
       .insert(users)
-      .values({ name: `Admin ${Date.now()}`, email: `sla-admin-${Date.now()}@example.com`, role: "System Admin", initials: "SA", accessLevel: "system_admin" })
+      .values({ name: `Gestor ${Date.now()}`, email: `award-manager-${Date.now()}@example.com`, role: "COE Manager", initials: "GM", accessLevel: "coe_manager" })
       .returning();
 
     const createResponse = await createTender(
@@ -461,7 +464,7 @@ describe("POST /api/tenders/:id/award — bloqueio por risco alto", () => {
     const blocked = await awardTender(
       jsonRequest(`http://localhost/api/tenders/${tender.id}/award`, {
         method: "POST",
-        session: { userId: admin.id, accessLevel: "system_admin" },
+        session: { userId: manager.id, accessLevel: "coe_manager" },
         body: { bidId: bid.id },
       }),
       { params: Promise.resolve({ id: tender.id }) }
@@ -471,14 +474,14 @@ describe("POST /api/tenders/:id/award — bloqueio por risco alto", () => {
     const overridden = await awardTender(
       jsonRequest(`http://localhost/api/tenders/${tender.id}/award`, {
         method: "POST",
-        session: { userId: admin.id, accessLevel: "system_admin" },
+        session: { userId: manager.id, accessLevel: "coe_manager" },
         body: { bidId: bid.id, overrideRisk: true },
       }),
       { params: Promise.resolve({ id: tender.id }) }
     );
     expect(overridden.status).toBe(201);
     const overriddenBody = await overridden.json();
-    expect(overriddenBody.po.riskOverriddenByUserId).toBe(admin.id);
+    expect(overriddenBody.po.riskOverriddenByUserId).toBe(manager.id);
     expect(overriddenBody.po.riskOverriddenAt).not.toBeNull();
   });
 });

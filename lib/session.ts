@@ -1,4 +1,14 @@
-export type AccessLevel = "system_admin" | "coe_manager" | "analyst" | "supplier" | "company_admin" | "requester";
+export type AccessLevel =
+  | "system_admin"
+  | "coe_manager"
+  | "analyst"
+  | "supplier"
+  | "company_admin"
+  | "requester"
+  | "technical_evaluator"
+  | "consignee"
+  | "finance_ap"
+  | "supplier_governance";
 
 export type SessionPayload = {
   userId: number;

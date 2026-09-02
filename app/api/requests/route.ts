@@ -14,14 +14,15 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim();
   const session = getSession(request);
 
-  // Pedidos são o passo anterior à execução P2P — analyst actua entre
-  // empresas só a partir da PO em diante (sem noção de "dono" de pedido) e
-  // supplier nunca teve pedidos ligados a si (só POs, recepções e
-  // facturas). Sem esta guarda, nenhuma das duas condições de âmbito
-  // abaixo se aplicava a estes dois níveis e a rota devolvia os pedidos de
-  // todas as empresas — mesmo padrão de "nunca ver tudo por omissão" já
-  // usado para supplier noutras rotas (POs, recepções, facturas, etc.).
-  if (session.accessLevel === "analyst" || session.accessLevel === "supplier") {
+  // Pedidos são o passo anterior à execução P2P — nenhum destes níveis
+  // tem noção de "dono" de pedido (analyst/technical_evaluator/consignee/
+  // finance_ap/supplier_governance actuam a partir da PO/tender/factura em
+  // diante; supplier nunca teve pedidos ligados a si). Sem esta guarda,
+  // nenhuma das condições de âmbito abaixo se aplicava e a rota devolvia
+  // os pedidos de todas as empresas — mesmo padrão de "nunca ver tudo por
+  // omissão" já usado para supplier noutras rotas (POs, recepções, etc.).
+  const NO_REQUEST_ACCESS: (typeof session.accessLevel)[] = ["analyst", "supplier", "technical_evaluator", "consignee", "finance_ap", "supplier_governance"];
+  if (NO_REQUEST_ACCESS.includes(session.accessLevel)) {
     return Response.json({ requests: [] });
   }
 

@@ -12,7 +12,7 @@ async function makeSupplier(name: string) {
 
 // catalog_items.created_by_user_id tem uma FK real para users.id — mesma
 // razão de tests/integration/tenders.test.ts#makeBuyer.
-async function makeCurator(accessLevel: "analyst" | "coe_manager" | "system_admin") {
+async function makeCurator(accessLevel: "analyst" | "coe_manager") {
   const db = getDb();
   const [user] = await db
     .insert(users)
@@ -28,7 +28,7 @@ async function makeCurator(accessLevel: "analyst" | "coe_manager" | "system_admi
 }
 
 describe("POST/GET /api/catalog", () => {
-  it("curators (analyst/coe_manager/system_admin) can add a catalog item", async () => {
+  it("curators (analyst/coe_manager) can add a catalog item", async () => {
     const supplier = await makeSupplier(`Fornecedor Catálogo ${Date.now()}`);
     const curator = await makeCurator("analyst");
 
@@ -63,11 +63,11 @@ describe("POST/GET /api/catalog", () => {
 
   it("a requester browsing the catalog only ever sees active items, never inactive ones", async () => {
     const supplier = await makeSupplier(`Fornecedor Filtro ${Date.now()}`);
-    const curator = await makeCurator("system_admin");
+    const curator = await makeCurator("coe_manager");
     const created = await createCatalogItem(
       jsonRequest("http://localhost/api/catalog", {
         method: "POST",
-        session: { userId: curator.id, accessLevel: "system_admin" },
+        session: { userId: curator.id, accessLevel: "coe_manager" },
         body: { name: "Item a desactivar", supplierId: supplier.id, unitPrice: 5000 },
       })
     );
@@ -76,7 +76,7 @@ describe("POST/GET /api/catalog", () => {
     await patchCatalogItem(
       jsonRequest(`http://localhost/api/catalog/${item.id}`, {
         method: "PATCH",
-        session: { userId: curator.id, accessLevel: "system_admin" },
+        session: { userId: curator.id, accessLevel: "coe_manager" },
         body: { active: false },
       }),
       { params: Promise.resolve({ id: item.id }) }
@@ -89,7 +89,7 @@ describe("POST/GET /api/catalog", () => {
     expect(requesterBody.items.some((row: { id: string }) => row.id === item.id)).toBe(false);
 
     const curatorView = await listCatalog(
-      jsonRequest("http://localhost/api/catalog", { method: "GET", session: { userId: curator.id, accessLevel: "system_admin" } })
+      jsonRequest("http://localhost/api/catalog", { method: "GET", session: { userId: curator.id, accessLevel: "coe_manager" } })
     );
     const curatorBody = await curatorView.json();
     expect(curatorBody.items.some((row: { id: string }) => row.id === item.id)).toBe(true);
@@ -98,18 +98,18 @@ describe("POST/GET /api/catalog", () => {
   it("a supplier only ever sees its own catalog items, including inactive ones", async () => {
     const supplierA = await makeSupplier(`Fornecedor A Catálogo ${Date.now()}`);
     const supplierB = await makeSupplier(`Fornecedor B Catálogo ${Date.now()}`);
-    const curator = await makeCurator("system_admin");
+    const curator = await makeCurator("coe_manager");
     await createCatalogItem(
       jsonRequest("http://localhost/api/catalog", {
         method: "POST",
-        session: { userId: curator.id, accessLevel: "system_admin" },
+        session: { userId: curator.id, accessLevel: "coe_manager" },
         body: { name: "Item do fornecedor A", supplierId: supplierA.id, unitPrice: 100 },
       })
     );
     await createCatalogItem(
       jsonRequest("http://localhost/api/catalog", {
         method: "POST",
-        session: { userId: curator.id, accessLevel: "system_admin" },
+        session: { userId: curator.id, accessLevel: "coe_manager" },
         body: { name: "Item do fornecedor B", supplierId: supplierB.id, unitPrice: 200 },
       })
     );

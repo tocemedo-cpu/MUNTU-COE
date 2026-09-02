@@ -246,6 +246,13 @@ export const bids = pgTable(
     notes: text("notes").notNull().default(""),
     status: text("status").notNull().default("submetida"), // submetida | vencedora | rejeitada
     submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().default(sql`now()`),
+    // Avaliação técnica (technical_evaluator) — separada da decisão
+    // comercial de adjudicação (award), que continua a não depender desta
+    // nota existir. Nulo até alguém avaliar.
+    technicalScore: integer("technical_score"),
+    technicalNotes: text("technical_notes").notNull().default(""),
+    technicallyEvaluatedByUserId: bigint("technically_evaluated_by_user_id", { mode: "number" }).references(() => users.id),
+    technicallyEvaluatedAt: timestamp("technically_evaluated_at", { withTimezone: true }),
   },
   (table) => [
     uniqueIndex("bids_tender_supplier_idx").on(table.tenderId, table.supplierId),
@@ -341,6 +348,10 @@ export const invoices = pgTable(
     // limpa | assistida | excecao — ver lib/billing.ts
     tier: text("tier").notNull().default("assistida"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    // Validação do 3-way match (finance_ap/coe_manager) — quem e quando
+    // confirmou o valor de `match`. Nulo enquanto por validar.
+    matchedByUserId: bigint("matched_by_user_id", { mode: "number" }).references(() => users.id),
+    matchedAt: timestamp("matched_at", { withTimezone: true }),
   },
   (table) => [index("invoices_company_id_idx").on(table.companyId), index("invoices_supplier_id_idx").on(table.supplierId)]
 );
@@ -384,6 +395,9 @@ export const paymentBatches = pgTable(
     // alto por resolver) — distingue de uma libertação manual
     // (PATCH /api/payments/:id), que nunca preenche isto.
     autoReleasedAt: timestamp("auto_released_at", { withTimezone: true }),
+    // Quem libertou manualmente (nulo numa libertação automática pelo
+    // agendador) — usado pelo audit log; a rota nunca gravava isto antes.
+    releasedByUserId: bigint("released_by_user_id", { mode: "number" }).references(() => users.id),
   },
   (table) => [index("payment_batches_company_id_idx").on(table.companyId)]
 );
@@ -591,3 +605,30 @@ export const consumedTokens = pgTable("consumed_tokens", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }).notNull().default(sql`now()`),
 });
+
+// Registo das operações críticas do RBAC (homologação, mudança de risco/
+// IBAN de fornecedor, override de risco alto, aprovação de pedido/PO/
+// pagamento/facturação ao cliente) — ver lib/audit.ts#recordAuditEvent.
+// actorUserId nulo cobre acções do agendador externo (via CRON_SECRET),
+// nunca de uma sessão sem utilizador real. before/after ficam em texto
+// (JSON.stringify), mesmo padrão do resto do schema, que não usa jsonb
+// nativo em lado nenhum.
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    actorUserId: bigint("actor_user_id", { mode: "number" }).references(() => users.id),
+    action: text("action").notNull(), // ex.: "request.approve", "supplier.risk_change"
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    before: text("before"),
+    after: text("after"),
+    metadata: text("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => [
+    index("audit_log_entity_idx").on(table.entityType, table.entityId),
+    index("audit_log_actor_user_id_idx").on(table.actorUserId),
+    index("audit_log_created_at_idx").on(table.createdAt),
+  ]
+);

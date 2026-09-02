@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { clientInvoiceLines, clientInvoices, companies } from "@/db/schema";
+import { recordAuditEvent } from "@/lib/audit";
 import { getSession } from "@/lib/authz";
 import { clientInvoiceActionSchema, parseJsonBody } from "@/lib/validation";
 
@@ -42,6 +43,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     })
     .where(eq(clientInvoices.id, id))
     .returning();
+
+  await recordAuditEvent(db, {
+    actorUserId: session.userId,
+    action: `client_invoice.${parsed.data.action}`,
+    entityType: "client_invoice",
+    entityId: id,
+    before: { status: existing.status },
+    after: { status: updated.status },
+  });
 
   return Response.json({ clientInvoice: updated });
 }

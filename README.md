@@ -43,24 +43,49 @@ Abra `http://localhost:3000`.
 | Analista (Buyer/AP) | `analyst` | sofia.neto@muntucoe.ao | Muntu2026! |
 | System Admin | `system_admin` | rui.domingos@muntucoe.ao | Muntu2026! |
 | Fornecedor | `supplier` | carlos.mateus@kwanzaindustrial.ao | Muntu2026! |
+| Avaliador Técnico | `technical_evaluator` | beatriz.sousa@muntucoe.ao | Muntu2026! |
+| Consignatário (Recepção) | `consignee` | tomas.kiala@operadora.ao | Muntu2026! |
+| Financeiro (AP) | `finance_ap` | elsa.ferreira@muntucoe.ao | Muntu2026! |
+| Governance de Fornecedores | `supplier_governance` | nuno.cardoso@muntucoe.ao | Muntu2026! |
 
 As palavras-passe são guardadas como hash bcrypt (`lib/password.ts`, `bcryptjs`) — nunca em texto simples. Se já tinha uma instalação anterior a esta alteração, volte a colar `supabase/schema.sql` no SQL Editor: a instrução de migração no fim do bloco de utilizadores reencripta em bcrypt qualquer palavra-passe ainda em texto simples (idempotente, não mexe em hashes já bcrypt).
 
 ## Personas e permissões
 
-Seis níveis de acesso, aplicados tanto no menu (frontend) como nas rotas de API (`middleware.ts` + `lib/authz.ts` — a autorização real vive no servidor, o frontend só esconde o que o utilizador não pode usar).
+Dez níveis de acesso, aplicados tanto no menu (frontend, `VIEW_ROLES` em `app/page.tsx`) como nas rotas de API (`middleware.ts` + `lib/authz.ts` — **a autorização real vive sempre no servidor**, o frontend só esconde o que o utilizador não pode usar; esconder um botão nunca é, por si só, a proteção).
 
 Lado do cliente:
 
-- **Requisitante** (`requester`) — limitado ao seu próprio workflow: consultar/criar os seus pedidos e escolher fornecedor no formulário. Sem acesso a aprovações, execução P2P, relatórios ou administração — essas rotas devolvem `403` no servidor mesmo que alguém tente chamá-las directamente.
-- **Administrador da empresa** (`company_admin`) — visão abrangente da sua empresa: tudo o que um requisitante vê, mais aprovações, toda a execução P2P e relatórios. Pedidos, POs, facturas, recepções, excepções e lotes de pagamento são todos filtrados por `companyId` — um `company_admin` nunca vê dados de outra empresa.
+- **Requisitante** (`requester`) — limitado ao seu próprio workflow: consultar/criar os seus pedidos e escolher fornecedor no formulário.
+- **Administrador da empresa** (`company_admin`) — gere utilizadores/configurações da própria empresa (Equipa, SSO), consulta dados e aprova pedidos **de outros** — nunca o seu próprio (segregação de funções, ver abaixo). Pedidos, POs, facturas, recepções, excepções e lotes de pagamento são todos filtrados por `companyId`. Não homologa candidaturas nem edita risco/IBAN/passport de fornecedor nenhum — isso é gestão de risco/vendor governance da Muntu, não da empresa cliente.
 
-Lado Muntu:
+Lado Muntu — execução:
 
-- **Analista — Buyer/AP** (`analyst`) — reporta ao COE Manager, restrito à **execução** do workflow (fornecedores, ordens de compra, recepções, facturas, excepções, pagamentos, repositório). Sem dashboard, sem relatórios, sem administração.
-- **COE Manager** (`coe_manager`) — visão abrangente: dashboard, relatórios, aprovações, toda a execução P2P entre empresas clientes, e a avaliação/homologação de candidaturas (ver "Candidaturas e homologação").
-- **System Admin** (`system_admin`) — responsável máximo da plataforma. Único nível com acesso a `/api/admin/**` e à página **Utilizadores**, onde concede/retira o nível de acesso de qualquer utilizador. Vê tudo o que o COE Manager vê.
-- **Fornecedor** (`supplier`) — vê e edita só o seu próprio perfil (Supplier Passport) e só as suas próprias POs, recepções e facturas. Cada utilizador `supplier` está ligado a um `suppliers.id` concreto (`users.supplier_id`); sem essa ligação, o âmbito fica vazio — nunca "vê tudo" por omissão. O System Admin faz a ligação em **Utilizadores**. Passport, risco e estado continuam avaliados pela Muntu (não editáveis pelo próprio fornecedor); categoria e conteúdo local são auto-declaráveis via `PATCH /api/suppliers/:id`. `PATCH /api/receipts/:id` (confirmar recepção) também está limitado à recepção do próprio fornecedor.
+- **Analista — Buyer/AP** (`analyst`) — execução P2P completa (fornecedores, ordens de compra, recepções, facturas, excepções, pagamentos, sourcing/tenders), cross-empresa. Sem dashboard, relatórios ou administração; sem editar risco/IBAN de fornecedor nem homologar candidaturas.
+- **Avaliador Técnico** (`technical_evaluator`) — avalia tecnicamente as propostas de um tender (pontuação/notas, `POST /api/tenders/:id/bids/:bidId/evaluate`), vê todas as propostas de um tender como um comprador — mas nunca adjudica comercialmente, cria pagamento nem edita fornecedor.
+- **Consignatário/Receiver** (`consignee`) — confirma entregas e recepções (GRN): `PATCH /api/receipts/:id` e `PATCH /api/purchase-orders/:id` (só `action:"deliver"`), escopado à própria empresa. Sem acesso a pedidos, facturas, pagamentos, fornecedores ou sourcing.
+- **Financeiro — AP** (`finance_ap`) — valida o 3-way match de facturas (`PATCH /api/invoices/:id`, nova acção `validate_match`), liberta pagamentos e aprova/rejeita a facturação da Muntu ao cliente (`/api/admin/billing`) — separado do System Admin. Sem homologação, sem editar risco/IBAN, sem adjudicar.
+
+Lado Muntu — governance:
+
+- **COE Manager** (`coe_manager`) — governance de negócio: dashboard, relatórios, aprovações (incluindo excepcionais), toda a execução P2P entre empresas clientes, homologação de candidaturas (ambos os tipos), gestão de risco/IBAN de fornecedor, e é o **único** nível que pode ultrapassar o bloqueio de um fornecedor de risco "Alto" (`lib/risk-block.ts`).
+- **Governance de Fornecedores** (`supplier_governance`) — vendor management dedicado: homologa candidaturas de **fornecedor** (nunca de empresa cliente — isso continua só `coe_manager`), documentos, e edita risco/passport/estado/IBAN de qualquer fornecedor (`PATCH /api/suppliers/:id`) a par do `coe_manager`.
+- **System Admin** (`system_admin`) — administração técnica, não negócio: IAM (**Utilizadores**, concede/retira qualquer nível de acesso), configuração de empresa/SSO (**Administração**), tarifas de facturação (`billing_rates`), suporte técnico (caixa de entrada completa) e o **Audit Log** (`GET /api/admin/audit-log`). Já não aprova pedidos, não homologa, não adjudica tenders, não avança POs/recepções/excepções, não liberta pagamentos, não cura o catálogo e não edita fornecedor nenhum — todas essas acções devolvem `403` mesmo chamadas directamente à API.
+- **Fornecedor** (`supplier`) — vê e edita só o seu próprio perfil (Supplier Passport) e só as suas próprias POs, recepções, facturas e contratos. Cada utilizador `supplier` está ligado a um `suppliers.id` concreto (`users.supplier_id`); sem essa ligação, o âmbito fica vazio — nunca "vê tudo" por omissão. Categoria e conteúdo local são auto-declaráveis (`PATCH /api/suppliers/:id`); passport/risco/estado/IBAN continuam só avaliação da Muntu.
+
+### Segregação de funções (SoD / princípio 4-eyes)
+
+Nos pontos mais sensíveis, a mesma pessoa não pode fechar o círculo sozinha — implementado como uma guarda "mesmo-actor" (`lib/sod.ts#assertDifferentActor`, devolve `409` se o actor actual for igual ao actor anterior), não uma fila de aprovação formal:
+
+- **Homologação** (`POST /api/applications/:id/homologate`) — quem homologa não pode ser quem aprovou a candidatura (`reviewedByUserId` no momento da aprovação).
+- **Aprovação de pedido** (`PATCH /api/requests/:id`) — ninguém aprova/rejeita o seu próprio pedido (`requests.owner_user_id`).
+- **Override de risco alto** (aprovação de pedido e adjudicação de tender) — quem confirma o override não pode ser quem criou o pedido/tender.
+
+Alteração de risco/IBAN de fornecedor (`PATCH /api/suppliers/:id`) e libertação de pagamento continuam restritas por nível de acesso (ver tabela acima), mas sem um "passo anterior" próprio na tabela para uma guarda de dois-actor — fica documentado como limitação conhecida, não uma fila de aprovação formal.
+
+### Audit Log
+
+`audit_log` (tabela nova) regista as operações críticas listadas acima, mais adjudicação de tender, avaliação técnica de proposta, aprovação/rejeição de facturação ao cliente e mudança do nível de acesso de um utilizador — `actor_user_id`, `action`, `entity_type`/`entity_id`, `before`/`after` (JSON) e `created_at` (`lib/audit.ts#recordAuditEvent`). Só leitura, só `system_admin`, em **Audit Log** (`GET /api/admin/audit-log`, paginado, filtros opcionais `?entityType=`/`?actorUserId=`). Sem política de retenção/purga por agora — cresce sem limite.
 
 ### Gestão de permissões (System Admin)
 
@@ -91,7 +116,7 @@ Modelo de preços do Estudo de Viabilidade §32.4/53.1: **retainer mensal + pre�
 - **Preços por unidade** vivem em `billing_rates` (seeded com o ponto médio de cada intervalo do estudo). Editáveis na própria página **Facturação** (painel "Tarifas por unidade", `system_admin`) via `PATCH /api/admin/billing-rates/:key`, ou por SQL directo se preferir.
 - **Retainer** vive em `companies.retainer_amount` (0 por omissão — o estudo não dá um valor indicativo, é "por cliente e escopo"). Editável na página **Facturação** (painel "Retainer por empresa") via `PATCH /api/admin/companies/:id`, ou por SQL directo: `update companies set retainer_amount = <valor AOA> where domain = '...'`.
 
-Fluxo: `POST /api/admin/billing` (system_admin) gera uma `client_invoice` para uma empresa/período/âmbito (parcial ou total), somando retainer + POs + facturas desse período. Fica em `pendente_aprovacao`. O System Admin aprova ou rejeita (`PATCH /api/admin/billing/:id`); uma factura aprovada pode depois ser marcada como `enviada_contabilidade` — não há integração real com um sistema de contabilidade, é só um estado que sinaliza a entrega (a contabilidade não faz parte desta plataforma).
+Fluxo: `POST /api/admin/billing` (`finance_ap`/`coe_manager` — `system_admin` só gere as tarifas, não aprova facturação, ver §Personas e permissões) gera uma `client_invoice` para uma empresa/período/âmbito (parcial ou total), somando retainer + POs + facturas desse período. Fica em `pendente_aprovacao`. `finance_ap`/`coe_manager` aprovam ou rejeitam (`PATCH /api/admin/billing/:id`); uma factura aprovada pode depois ser marcada como `enviada_contabilidade` — não há integração real com um sistema de contabilidade, é só um estado que sinaliza a entrega (a contabilidade não faz parte desta plataforma).
 
 **Geração mensal automática:** `POST /api/admin/billing/generate-monthly` gera a factura do mês anterior para todas as empresas. Não corre sozinha — precisa de ser chamada por um agendador externo (Render Cron Job, GitHub Actions, cron-job.org, ...) com o header `x-cron-secret: <CRON_SECRET>`. Defina `CRON_SECRET` no Render; sem ele, a rota recusa sempre (nunca fica aberta por omissão).
 

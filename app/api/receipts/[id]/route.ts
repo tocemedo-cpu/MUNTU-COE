@@ -5,8 +5,11 @@ import { forbidUnless, getSession } from "@/lib/authz";
 import { recordPoEvent } from "@/lib/po-events";
 import { parseJsonBody, receiptActionSchema } from "@/lib/validation";
 
+// Procurement, fora do system_admin desde o redesenho de RBAC (ver README
+// §Personas e permissões); consignee entra para confirmar a recepção
+// (GRN) na própria empresa.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "supplier", "consignee"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;
@@ -18,7 +21,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!existing) return Response.json({ error: "Recepção não encontrada" }, { status: 404 });
 
   const session = getSession(request);
-  if (session.accessLevel === "company_admin" && existing.companyId !== session.companyId) {
+  if ((session.accessLevel === "company_admin" || session.accessLevel === "consignee") && existing.companyId !== session.companyId) {
     return Response.json({ error: "Sem permissão para aceder a este recurso." }, { status: 403 });
   }
   if (session.accessLevel === "supplier" && existing.supplierId !== session.supplierId) {

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { getDb } from "@/db";
-import { contracts, exceptions, invoices, purchaseOrders, receipts, requests } from "@/db/schema";
+import { applications, contracts, exceptions, invoices, purchaseOrders, receipts, requests } from "@/db/schema";
 import type { RequestSession } from "./authz";
 
 export const DOCUMENT_ENTITY_TYPES = [
@@ -46,13 +46,13 @@ export async function canAccessDocumentEntity(
     }
     case "supplier": {
       if (session.accessLevel === "supplier") return session.supplierId === Number(entityId);
-      return session.accessLevel === "company_admin" || session.accessLevel === "analyst";
+      return session.accessLevel === "company_admin" || session.accessLevel === "analyst" || session.accessLevel === "supplier_governance";
     }
     case "purchase_order": {
       const [row] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, entityId));
       if (!row) return false;
       if (session.accessLevel === "supplier") return row.supplierId === session.supplierId;
-      if (session.accessLevel === "company_admin") return row.companyId === session.companyId;
+      if (session.accessLevel === "company_admin" || session.accessLevel === "consignee") return row.companyId === session.companyId;
       return session.accessLevel === "analyst";
     }
     case "invoice": {
@@ -60,13 +60,13 @@ export async function canAccessDocumentEntity(
       if (!row) return false;
       if (session.accessLevel === "supplier") return row.supplierId === session.supplierId;
       if (session.accessLevel === "company_admin") return row.companyId === session.companyId;
-      return session.accessLevel === "analyst";
+      return session.accessLevel === "analyst" || session.accessLevel === "finance_ap";
     }
     case "receipt": {
       const [row] = await db.select().from(receipts).where(eq(receipts.id, Number(entityId)));
       if (!row) return false;
       if (session.accessLevel === "supplier") return row.supplierId === session.supplierId;
-      if (session.accessLevel === "company_admin") return row.companyId === session.companyId;
+      if (session.accessLevel === "company_admin" || session.accessLevel === "consignee") return row.companyId === session.companyId;
       return session.accessLevel === "analyst";
     }
     case "exception": {
@@ -82,11 +82,16 @@ export async function canAccessDocumentEntity(
       if (session.accessLevel === "company_admin") return row.companyId === session.companyId;
       return session.accessLevel === "analyst";
     }
-    // "application" (candidatura) tem propositadamente sem caso aqui: quem
-    // se candidata ainda não tem sessão nenhuma (nem conta), por isso o seu
-    // acesso é feito por token dedicado em /api/applications/[id]/documents,
-    // não por esta função — chegar aqui sem ser coe_manager/system_admin
-    // (apanhado acima) significa sempre "sem acesso".
+    // "application" (candidatura): quem se candidata ainda não tem sessão
+    // nenhuma (nem conta), por isso o seu acesso é feito por token dedicado
+    // em /api/applications/[id]/documents, não por esta função.
+    // supplier_governance só revê candidaturas de fornecedor (mesma regra
+    // de APPLICATION_REVIEW_ROLES/kind em .../homologate/route.ts).
+    case "application": {
+      if (session.accessLevel !== "supplier_governance") return false;
+      const [row] = await db.select().from(applications).where(eq(applications.id, entityId));
+      return Boolean(row && row.kind === "fornecedor");
+    }
     default:
       return false;
   }

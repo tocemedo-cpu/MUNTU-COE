@@ -70,7 +70,7 @@ import { bucketRequestsByMonth, computeAvgCycleDays, computeSlaOnTimePct } from 
 type PortalView =
   | "dashboard" | "new-request" | "requests" | "approvals" | "suppliers"
   | "tenders" | "contracts" | "catalog" | "pos" | "receipts" | "invoices" | "exceptions" | "payments"
-  | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications" | "team";
+  | "reports" | "repository" | "admin" | "users" | "billing" | "support" | "applications" | "team" | "audit-log";
 
 type RequestItem = {
   id: string;
@@ -126,7 +126,17 @@ const APPLICATION_STATUS_LABEL: Record<ApplicationStatus, string> = {
 };
 type PaymentBatch = { id: string; date: string; count: number; value: number; status: string; released: boolean };
 type DocumentItem = { id: number; name: string; type: string; request: string; owner: string; version: string; updated: string };
-type AccessLevel = "system_admin" | "coe_manager" | "analyst" | "supplier" | "company_admin" | "requester";
+type AccessLevel =
+  | "system_admin"
+  | "coe_manager"
+  | "analyst"
+  | "supplier"
+  | "company_admin"
+  | "requester"
+  | "technical_evaluator"
+  | "consignee"
+  | "finance_ap"
+  | "supplier_governance";
 type AuthUser = { id: number; name: string; email: string; role: string; initials: string; tenant: string; accessLevel: AccessLevel; companyId: number | null; supplierId: number | null };
 
 const stages = ["Intake", "Validação", "Aprovação", "PO", "Receção", "Factura", "Excepção", "Pagamento"];
@@ -601,36 +611,43 @@ function Login({
 
 // Quem pode ver cada vista. Um "requester" fica limitado ao seu próprio
 // workflow de pedidos; um "analyst" (buyer/AP) fica limitado à execução
-// P2P (sem dashboard, relatórios ou administração — isso é do COE
-// manager); "company_admin", "coe_manager" e "system_admin" têm visão
-// abrangente. A imposição real está nas rotas de API (middleware.ts +
-// lib/authz.ts) — isto só decide o que aparece no menu.
+// P2P; "company_admin" e "coe_manager" têm visão abrangente (o COE
+// Manager acumula governance/homologação/risco desde o redesenho de
+// RBAC). "system_admin" perdeu os ecrãs de negócio (aprovações,
+// candidaturas) — fica só com administração técnica/IAM/config e o novo
+// Audit Log. technical_evaluator/consignee/finance_ap/supplier_governance
+// são os quatro papéis novos, cada um limitado ao seu recorte funcional.
+// A imposição real está nas rotas de API (middleware.ts + lib/authz.ts)
+// — isto só decide o que aparece no menu.
 const VIEW_ROLES: Record<PortalView, AccessLevel[]> = {
   dashboard: ["company_admin", "coe_manager", "system_admin"],
   "new-request": ["requester", "company_admin"],
-  requests: ["requester", "company_admin", "coe_manager", "system_admin"],
-  approvals: ["company_admin", "coe_manager", "system_admin"],
-  suppliers: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
-  tenders: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
-  contracts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
-  catalog: ["requester", "company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
-  pos: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
-  receipts: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
-  invoices: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
-  exceptions: ["company_admin", "analyst", "coe_manager", "system_admin"],
-  payments: ["company_admin", "analyst", "coe_manager", "system_admin"],
-  reports: ["company_admin", "coe_manager", "system_admin"],
-  repository: ["company_admin", "analyst", "coe_manager", "system_admin"],
+  requests: ["requester", "company_admin", "coe_manager"],
+  approvals: ["company_admin", "coe_manager"],
+  suppliers: ["company_admin", "analyst", "coe_manager", "supplier", "supplier_governance"],
+  tenders: ["company_admin", "analyst", "coe_manager", "supplier", "technical_evaluator"],
+  contracts: ["company_admin", "analyst", "coe_manager", "supplier"],
+  catalog: ["requester", "company_admin", "analyst", "coe_manager", "supplier"],
+  pos: ["company_admin", "analyst", "coe_manager", "supplier", "consignee"],
+  receipts: ["company_admin", "analyst", "coe_manager", "supplier", "consignee"],
+  invoices: ["company_admin", "analyst", "coe_manager", "supplier", "finance_ap"],
+  exceptions: ["company_admin", "analyst", "coe_manager"],
+  payments: ["company_admin", "analyst", "coe_manager", "finance_ap"],
+  reports: ["company_admin", "coe_manager"],
+  repository: ["company_admin", "analyst", "coe_manager"],
   admin: ["system_admin"],
   users: ["system_admin"],
-  billing: ["system_admin"],
+  billing: ["coe_manager", "finance_ap", "system_admin"],
+  "audit-log": ["system_admin"],
   // Qualquer persona pode abrir um pedido de suporte; só o System Admin
   // vê a caixa de entrada completa — essa distinção fica dentro do
   // próprio componente (ver Support/SupportInbox), não no menu.
-  support: ["requester", "company_admin", "analyst", "coe_manager", "system_admin", "supplier"],
+  support: ["requester", "company_admin", "analyst", "coe_manager", "system_admin", "supplier", "technical_evaluator", "consignee", "finance_ap", "supplier_governance"],
   // Avaliar/homologar candidaturas (Candidatura -> ... -> Acesso Muntu) é
-  // trabalho da equipa Muntu, não de uma empresa/fornecedor cliente.
-  applications: ["coe_manager", "system_admin"],
+  // governance de negócio: coe_manager (ambos os tipos) e
+  // supplier_governance (só candidaturas de fornecedor, filtrado dentro
+  // do próprio ecrã — ver Applications).
+  applications: ["coe_manager", "supplier_governance"],
   // Convidar colegas para a própria empresa — só o Administrador da
   // empresa, escopado à sua própria empresa (ver /api/company/users).
   team: ["company_admin"],
@@ -641,11 +658,11 @@ const navigation: { group: string; items: { id: PortalView; label: string; icon:
   { group: "HOMOLOGAÇÃO", items: [{ id: "applications", label: "Candidaturas", icon: Handshake }] },
   { group: "SOURCING", items: [{ id: "tenders", label: "Tenders (RFQ)", icon: Gavel }, { id: "contracts", label: "Contratos", icon: BriefcaseBusiness }, { id: "catalog", label: "Catálogo", icon: Package }] },
   { group: "EXECUÇÃO P2P", items: [{ id: "suppliers", label: "Fornecedores", icon: Users }, { id: "pos", label: "Ordens de compra", icon: ShoppingCart }, { id: "receipts", label: "Recepções", icon: PackageCheck }, { id: "invoices", label: "Facturas & match", icon: ReceiptText }, { id: "exceptions", label: "Excepções", icon: AlertTriangle }, { id: "payments", label: "Pagamentos", icon: WalletCards }] },
-  { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }] },
+  { group: "INTELIGÊNCIA", items: [{ id: "reports", label: "Relatórios", icon: BarChart3 }, { id: "repository", label: "Repositório", icon: Database }, { id: "admin", label: "Administração", icon: Settings }, { id: "users", label: "Utilizadores", icon: UserCog }, { id: "billing", label: "Facturação", icon: Landmark }, { id: "audit-log", label: "Audit Log", icon: ShieldCheck }] },
   { group: "SUPORTE", items: [{ id: "support", label: "Suporte", icon: LifeBuoy }] },
 ];
 
-const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", tenders: "Tenders (RFQ)", contracts: "Contratos", catalog: "Catálogo", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa" };
+const viewLabels: Record<PortalView, string> = { dashboard: "Visão geral", "new-request": "Novo pedido", requests: "Meus pedidos", approvals: "Aprovações", suppliers: "Fornecedores", tenders: "Tenders (RFQ)", contracts: "Contratos", catalog: "Catálogo", pos: "Ordens de compra", receipts: "Recepções", invoices: "Facturas & match", exceptions: "Excepções", payments: "Pagamentos", reports: "Relatórios", repository: "Repositório", admin: "Administração", users: "Utilizadores", billing: "Facturação", support: "Suporte", applications: "Candidaturas", team: "Equipa", "audit-log": "Audit Log" };
 
 function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const firstAllowedView = (navigation.flatMap((group) => group.items).find((item) => VIEW_ROLES[item.id].includes(user.accessLevel))?.id ?? "dashboard") as PortalView;
@@ -676,11 +693,20 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [form, setForm] = useState({ tower: "Requisition-to-PO", type: "PO standard", subject: "", costCenter: "", supplier: "", value: "", due: "", approver: "", priority: "Média", notes: "" });
 
   const isRequester = user.accessLevel === "requester";
-  // analyst/supplier não têm noção nenhuma de "dono" de pedido (ver
-  // app/api/requests/route.ts) — a rota devolve sempre {requests: []} para
-  // estes dois níveis, e nenhum ecrã seu chega a mostrar esta lista, por
-  // isso nem vale a pena chamar a API.
-  const skipsRequestsFetch = user.accessLevel === "analyst" || user.accessLevel === "supplier";
+  // Nenhum destes tem noção de "dono" de pedido (ver
+  // app/api/requests/route.ts) — a rota devolve sempre {requests: []}, e
+  // nenhum ecrã seu chega a mostrar esta lista, por isso nem vale a pena
+  // chamar a API.
+  const skipsRequestsFetch = ["analyst", "supplier", "technical_evaluator", "consignee", "finance_ap", "supplier_governance"].includes(user.accessLevel);
+  // Cada papel novo só alcança o subconjunto de execução P2P que lhe toca
+  // (ver ROUTE_ACCESS em middleware.ts) — chamar as outras rotas só
+  // rebentava o Promise.all com um 403 sem nenhum ecrã as usar.
+  const canFetchPos = ["company_admin", "analyst", "coe_manager", "supplier", "consignee"].includes(user.accessLevel);
+  const canFetchReceipts = canFetchPos;
+  const canFetchInvoices = ["company_admin", "analyst", "coe_manager", "supplier", "finance_ap"].includes(user.accessLevel);
+  const canFetchExceptions = ["company_admin", "analyst", "coe_manager"].includes(user.accessLevel);
+  const canFetchPayments = ["company_admin", "analyst", "coe_manager", "finance_ap"].includes(user.accessLevel);
+  const canFetchDocuments = ["company_admin", "analyst", "coe_manager"].includes(user.accessLevel);
 
   useEffect(() => {
     let cancelled = false;
@@ -700,20 +726,13 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
         setApprovers(ap.approvers);
 
         if (!isRequester) {
-          const isSupplier = user.accessLevel === "supplier";
-          // Um fornecedor está bloqueado no servidor para excepções,
-          // pagamentos e o Repositório geral (ROUTE_ACCESS em
-          // middleware.ts e GENERAL_LIST_ROLES em app/api/documents/
-          // route.ts nunca o incluem — só vê os documentos ligados ao seu
-          // próprio Supplier Passport, por entidade) — nem sequer as
-          // chama, mesmo motivo do "isRequester" acima.
           const [po, rc, inv, exc, pay, doc] = await Promise.all([
-            api<{ purchaseOrders: PurchaseOrder[] }>("/api/purchase-orders"),
-            api<{ receipts: Receipt[] }>("/api/receipts"),
-            api<{ invoices: Invoice[] }>("/api/invoices"),
-            isSupplier ? Promise.resolve({ exceptions: [] }) : api<{ exceptions: ExceptionItem[] }>("/api/exceptions"),
-            isSupplier ? Promise.resolve({ paymentBatches: [] }) : api<{ paymentBatches: PaymentBatch[] }>("/api/payments"),
-            isSupplier ? Promise.resolve({ documents: [] }) : api<{ documents: DocumentItem[] }>("/api/documents"),
+            canFetchPos ? api<{ purchaseOrders: PurchaseOrder[] }>("/api/purchase-orders") : Promise.resolve({ purchaseOrders: [] }),
+            canFetchReceipts ? api<{ receipts: Receipt[] }>("/api/receipts") : Promise.resolve({ receipts: [] }),
+            canFetchInvoices ? api<{ invoices: Invoice[] }>("/api/invoices") : Promise.resolve({ invoices: [] }),
+            canFetchExceptions ? api<{ exceptions: ExceptionItem[] }>("/api/exceptions") : Promise.resolve({ exceptions: [] }),
+            canFetchPayments ? api<{ paymentBatches: PaymentBatch[] }>("/api/payments") : Promise.resolve({ paymentBatches: [] }),
+            canFetchDocuments ? api<{ documents: DocumentItem[] }>("/api/documents") : Promise.resolve({ documents: [] }),
           ]);
           if (cancelled) return;
           setPurchaseOrders(po.purchaseOrders);
@@ -724,7 +743,7 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           setDocumentsList(doc.documents);
         }
 
-        if (user.accessLevel === "coe_manager" || user.accessLevel === "system_admin") {
+        if (user.accessLevel === "coe_manager" || user.accessLevel === "supplier_governance") {
           const { applications } = await api<{ applications: ApplicationItem[] }>("/api/applications");
           if (cancelled) return;
           setApplicationsList(applications);
@@ -801,6 +820,16 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
       toast.success(`${id} resolvida e registada na auditoria`);
     } catch {
       toast.error("Não foi possível resolver a excepção");
+    }
+  };
+
+  const validateInvoiceMatch = async (id: string, match: "3-way match" | "Preço divergente" | "Receção em falta") => {
+    try {
+      const { invoice: updated } = await api<{ invoice: Invoice }>(`/api/invoices/${id}`, { method: "PATCH", body: JSON.stringify({ action: "validate_match", match }) });
+      setInvoicesList((items) => items.map((item) => (item.id === id ? updated : item)));
+      toast.success(`${id} — match validado (${match})`);
+    } catch {
+      toast.error("Não foi possível validar o match");
     }
   };
 
@@ -973,23 +1002,24 @@ function Portal({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
           {view === "new-request" && <NewRequest step={wizardStep} setStep={setWizardStep} form={form} setForm={setForm} submit={submitRequest} suppliers={suppliersList} approvers={approvers} onUploadDocument={uploadDocument} />}
           {view === "requests" && <RequestsTable title="Meus pedidos" subtitle="Acompanhe prioridade, responsável, etapa e SLA em tempo real." requests={filteredRequests} onSelect={setSelectedRequest} />}
           {view === "approvals" && <Approvals requests={requests.filter((item) => item.status === "Aprovação")} onAction={actOnRequest} onSelect={setSelectedRequest} />}
-          {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} onUpdateBankDetails={updateSupplierProfile} />)}
+          {view === "suppliers" && (user.accessLevel === "supplier" ? <SupplierProfile supplier={suppliersList[0]} onUpdate={updateSupplierProfile} /> : <Suppliers search={search} suppliers={suppliersList} user={user} onInvite={inviteSupplier} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} onUpdateBankDetails={updateSupplierProfile} />)}
           {view === "tenders" && <Tenders user={user} suppliersList={suppliersList} />}
           {view === "contracts" && <Contracts user={user} suppliersList={suppliersList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "catalog" && <Catalog user={user} suppliersList={suppliersList} />}
           {view === "pos" && <PurchaseOrders purchaseOrders={purchaseOrders} user={user} onAdvancePo={advancePo} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "receipts" && <Receipts receipts={receiptsList} onConfirm={confirmReceipt} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
-          {view === "invoices" && <Invoices search={search} invoices={invoicesList} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
+          {view === "invoices" && <Invoices search={search} invoices={invoicesList} user={user} onValidateMatch={validateInvoiceMatch} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "exceptions" && <Exceptions items={exceptionsList} onResolve={resolveException} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "payments" && <Payments batches={paymentBatches} onRelease={releasePayment} onExportIso20022={exportIso20022} />}
           {view === "reports" && <Reports requests={requests} exceptions={exceptionsList} invoices={invoicesList} purchaseOrders={purchaseOrders} suppliers={suppliersList} />}
           {view === "repository" && <Repository search={search} documents={documentsList} onUpload={uploadDocument} onDownload={downloadDocument} />}
           {view === "admin" && <Administration user={user} />}
           {view === "users" && <UsersAdmin />}
-          {view === "billing" && <ClientBilling />}
+          {view === "billing" && <ClientBilling user={user} />}
           {view === "support" && <Support user={user} />}
           {view === "applications" && <Applications applications={applicationsList} onApplicationUpdated={(updated) => setApplicationsList((items) => items.map((item) => (item.id === updated.id ? updated : item)))} onUploadDocument={uploadDocument} onDownloadDocument={downloadDocument} />}
           {view === "team" && <Team />}
+          {view === "audit-log" && <AuditLog />}
         </>}
       </main>
     </section>
@@ -1044,11 +1074,13 @@ function Approvals({ requests, onAction, onSelect }: { requests: RequestItem[]; 
 
 function SupplierPassportSheet({
   supplier,
+  canEditBank,
   onUploadDocument,
   onDownloadDocument,
   onUpdateBankDetails,
 }: {
   supplier: Supplier;
+  canEditBank: boolean;
   onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
   onDownloadDocument: (doc: DocumentItem) => void;
   onUpdateBankDetails: (id: number, fields: { iban?: string; bic?: string }) => Promise<void>;
@@ -1081,14 +1113,14 @@ function SupplierPassportSheet({
       <article><AlertTriangle /><div><strong>{supplier.risk}</strong><span>Classificação de risco</span></div></article>
       <article><CheckCircle2 /><div><strong>{supplier.status}</strong><span>Estado</span></div></article>
     </section>
-    <div className="sheet-documents">
+    {canEditBank && <div className="sheet-documents">
       <div className="sheet-documents-head"><h3>Conta bancária (exportação ISO 20022)</h3></div>
       <form onSubmit={saveBankDetails} className="form-grid">
         <label className="form-field">IBAN<Input value={iban} onChange={(event) => setIban(event.target.value)} placeholder="AO06 0000 0000 0000 0000 0000 0" /></label>
         <label className="form-field">BIC<Input value={bic} onChange={(event) => setBic(event.target.value)} placeholder="BAOAAOLU" /></label>
         <div className="header-actions"><Button type="submit" size="sm" disabled={saving}>{saving ? "A guardar…" : "Guardar conta bancária"}</Button></div>
       </form>
-    </div>
+    </div>}
     <EntityDocuments entityType="supplier" entityId={String(supplier.id)} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
   </div></>;
 }
@@ -1096,6 +1128,7 @@ function SupplierPassportSheet({
 function Suppliers({
   search,
   suppliers,
+  user,
   onInvite,
   onUploadDocument,
   onDownloadDocument,
@@ -1103,16 +1136,21 @@ function Suppliers({
 }: {
   search: string;
   suppliers: Supplier[];
+  user: AuthUser;
   onInvite: () => void;
   onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
   onDownloadDocument: (doc: DocumentItem) => void;
   onUpdateBankDetails: (id: number, fields: { iban?: string; bic?: string }) => Promise<void>;
 }) {
   const [selected, setSelected] = useState<Supplier | null>(null);
+  // Risco/passport/estado/IBAN passam a ser gestão de risco/vendor
+  // governance — só coe_manager e supplier_governance, desde o redesenho
+  // de RBAC (ver README §Personas e permissões e PATCH /api/suppliers/:id).
+  const canEditBank = user.accessLevel === "coe_manager" || user.accessLevel === "supplier_governance";
   const list = suppliers.filter((supplier) => supplier.name.toLowerCase().includes(search.toLowerCase()));
   const passportAvg = suppliers.length ? Math.round(suppliers.reduce((sum, item) => sum + item.passport, 0) / suppliers.length) : 0;
   return <><PageHeader kicker="SUPPLIER PASSPORT" title="Fornecedores" description="Onboarding, compliance, conteúdo local, risco e desempenho numa única vista." action={<Button className="btn-burgundy" onClick={onInvite}><Plus /> Convidar fornecedor</Button>} /><section className="supplier-summary"><article><Users /><div><strong>{suppliers.length}</strong><span>Fornecedores registados</span></div></article><article><ShieldCheck /><div><strong>{passportAvg}%</strong><span>Passport médio</span></div></article><article><Globe2 /><div><strong>{suppliers.filter((item) => item.status === "Activo").length}</strong><span>Fornecedores activos</span></div></article><article><AlertTriangle /><div><strong>{suppliers.filter((item) => item.status === "Revisão" || item.status === "Documentos").length}</strong><span>Revisões pendentes</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Categoria</TableHead><TableHead>Supplier Passport</TableHead><TableHead>Conteúdo local</TableHead><TableHead>Risco</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((supplier) => <TableRow key={supplier.id}><TableCell><strong>{supplier.name}</strong></TableCell><TableCell>{supplier.category}</TableCell><TableCell><div className="passport-cell"><Progress value={supplier.passport} /><span>{supplier.passport}%</span></div></TableCell><TableCell>{supplier.local}</TableCell><TableCell><span className={supplier.risk === "Baixo" ? "risk-low" : "risk-medium"}>{supplier.risk}</span></TableCell><TableCell><span className={statusClass(supplier.status)}>{supplier.status}</span></TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(supplier)} aria-label={`Ver Supplier Passport de ${supplier.name}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
-  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <SupplierPassportSheet supplier={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} onUpdateBankDetails={onUpdateBankDetails} />}</SheetContent></Sheet>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <SupplierPassportSheet supplier={selected} canEditBank={canEditBank} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} onUpdateBankDetails={onUpdateBankDetails} />}</SheetContent></Sheet>
   </>;
 }
 
@@ -1186,12 +1224,17 @@ const PO_NEXT_ACTIONS: { action: "ship" | "deliver" | "flag_exception" | "resolv
 function PurchaseOrderTimelineSheet({
   po,
   canAdvance,
+  deliverOnly,
   onAdvance,
   onUploadDocument,
   onDownloadDocument,
 }: {
   po: PurchaseOrder;
   canAdvance: boolean;
+  // consignee só confirma entrega (GRN) — nunca expediting/excepção, que
+  // continuam do lado buyer/AP (mesma regra aplicada no servidor, ver
+  // PATCH /api/purchase-orders/:id).
+  deliverOnly?: boolean;
   onAdvance: (poId: string, action: "ship" | "deliver" | "flag_exception" | "resolve_exception") => Promise<void>;
   onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
   onDownloadDocument: (doc: DocumentItem) => void;
@@ -1222,7 +1265,9 @@ function PurchaseOrderTimelineSheet({
     }
   };
 
-  const availableActions = canAdvance ? PO_NEXT_ACTIONS.filter((item) => item.from.includes(po.status)) : [];
+  const availableActions = canAdvance
+    ? PO_NEXT_ACTIONS.filter((item) => item.from.includes(po.status) && (!deliverOnly || item.action === "deliver"))
+    : [];
 
   return <><SheetHeader><p className="kicker">LINHA TEMPORAL DA PO</p><SheetTitle>{po.id}</SheetTitle><SheetDescription>{po.description}</SheetDescription></SheetHeader><div className="sheet-body">
     <div className="sheet-value"><small>VALOR</small><strong>{money(po.value)}</strong><p>{po.supplier}</p></div>
@@ -1252,15 +1297,17 @@ function PurchaseOrders({
 }) {
   const [selected, setSelected] = useState<PurchaseOrder | null>(null);
   const [exportFormOpen, setExportFormOpen] = useState(false);
-  const canExport = user.accessLevel === "company_admin" || user.accessLevel === "system_admin";
+  const canExport = user.accessLevel === "company_admin";
   // Um fornecedor vê a sua própria PO mas não pode avançar o estado — só
   // quem faz o trabalho de execução (cliente/Muntu) tem os botões, mesmo
-  // conjunto de papéis aceite pelo PATCH no servidor.
+  // conjunto de papéis aceite pelo PATCH no servidor. consignee só
+  // confirma entrega (ver PurchaseOrderTimelineSheet#deliverOnly).
   const canAdvance = user.accessLevel !== "supplier";
+  const deliverOnly = user.accessLevel === "consignee";
   return <><PageHeader kicker="PURCHASE ORDER CONTROL TOWER" title="Ordens de compra" description="Emissão, confirmação, expediting, alterações e entrega controlados ponta-a-ponta." action={canExport ? <Button variant="outline" onClick={() => setExportFormOpen((open) => !open)}><Download /> Exportar mapa</Button> : undefined} />
     {exportFormOpen && <SapExportForm user={user} onExported={() => setExportFormOpen(false)} />}
     <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>PO</TableHead><TableHead>Fornecedor</TableHead><TableHead>Descrição</TableHead><TableHead>Valor AOA</TableHead><TableHead>Estado</TableHead><TableHead>Próxima acção</TableHead><TableHead /></TableRow></TableHeader><TableBody>{purchaseOrders.map((po) => <TableRow key={po.id}><TableCell><strong>{po.id}</strong></TableCell><TableCell>{po.supplier}</TableCell><TableCell>{po.description}</TableCell><TableCell>{money(po.value)}</TableCell><TableCell><span className={statusClass(po.status)}>{po.status}</span></TableCell><TableCell>{po.nextAction}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(po)} aria-label={`Ver linha temporal de ${po.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
-  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <PurchaseOrderTimelineSheet po={selected} canAdvance={canAdvance} onAdvance={async (poId, action) => { const updated = await onAdvancePo(poId, action); if (updated) setSelected(updated); }} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <PurchaseOrderTimelineSheet po={selected} canAdvance={canAdvance} deliverOnly={deliverOnly} onAdvance={async (poId, action) => { const updated = await onAdvancePo(poId, action); if (updated) setSelected(updated); }} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
   </>;
 }
 
@@ -1342,21 +1389,65 @@ function Receipts({ receipts, onConfirm, onUploadDocument, onDownloadDocument }:
   </>;
 }
 
-function InvoiceMatchSheet({ invoice, onUploadDocument, onDownloadDocument }: { invoice: Invoice; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+function InvoiceMatchSheet({
+  invoice,
+  user,
+  onValidateMatch,
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  invoice: Invoice;
+  user: AuthUser;
+  onValidateMatch: (id: string, match: "3-way match" | "Preço divergente" | "Receção em falta") => Promise<void>;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
+  const [validating, setValidating] = useState(false);
+  // Validação do 3-way match — finance_ap/coe_manager, separado do
+  // System Admin desde o redesenho de RBAC (ver README §Personas e
+  // permissões e PATCH /api/invoices/:id).
+  const canValidateMatch = user.accessLevel === "finance_ap" || user.accessLevel === "coe_manager";
+  const validate = async (match: "3-way match" | "Preço divergente" | "Receção em falta") => {
+    setValidating(true);
+    try {
+      await onValidateMatch(invoice.id, match);
+    } finally {
+      setValidating(false);
+    }
+  };
   return <><SheetHeader><p className="kicker">IMAGEM E MATCH</p><SheetTitle>{invoice.id}</SheetTitle><SheetDescription>{invoice.supplier} • {invoice.po}</SheetDescription></SheetHeader><div className="sheet-body">
     <div className="sheet-status"><span className={statusClass(invoice.status)}>{invoice.status}</span><span>{invoice.match}</span></div>
     <div className="sheet-value"><small>VALOR</small><strong>{money(invoice.value)}</strong><p>Vencimento: {invoice.due}</p></div>
+    {canValidateMatch && <div className="header-actions">
+      <Button variant="outline" disabled={validating} onClick={() => validate("3-way match")}>3-way match</Button>
+      <Button variant="outline" disabled={validating} onClick={() => validate("Preço divergente")}>Preço divergente</Button>
+      <Button variant="outline" disabled={validating} onClick={() => validate("Receção em falta")}>Receção em falta</Button>
+    </div>}
     <EntityDocuments entityType="invoice" entityId={invoice.id} title="Imagem da factura" onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />
   </div></>;
 }
 
-function Invoices({ search, invoices, onUploadDocument, onDownloadDocument }: { search: string; invoices: Invoice[]; onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>; onDownloadDocument: (doc: DocumentItem) => void }) {
+function Invoices({
+  search,
+  invoices,
+  user,
+  onValidateMatch,
+  onUploadDocument,
+  onDownloadDocument,
+}: {
+  search: string;
+  invoices: Invoice[];
+  user: AuthUser;
+  onValidateMatch: (id: string, match: "3-way match" | "Preço divergente" | "Receção em falta") => Promise<void>;
+  onUploadDocument: (file: File, options?: { type?: string; request?: string; entityType?: string; entityId?: string }) => Promise<DocumentItem | null>;
+  onDownloadDocument: (doc: DocumentItem) => void;
+}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<Invoice | null>(null);
   const list = invoices.filter((invoice) => [invoice.id, invoice.supplier, invoice.po, invoice.status].some((item) => item.toLowerCase().includes(search.toLowerCase())));
   const touchless = invoices.length ? Math.round((invoices.filter((item) => item.match === "3-way match").length / invoices.length) * 100) : 0;
   return <><PageHeader kicker="ACCOUNTS PAYABLE" title="Facturas & match" description="Recepção digital, validação fiscal, 2/3-way match e fila de excepções." action={<><input ref={fileInputRef} type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) onUploadDocument(file, { type: "Factura" }); event.target.value = ""; }} /><Button className="btn-burgundy" onClick={() => fileInputRef.current?.click()}><UploadCloud /> Carregar factura</Button></>} /><section className="match-summary"><article><FileCheck2 /><div><strong>{touchless}%</strong><span>Touchless match</span></div></article><article><AlertTriangle /><div><strong>{invoices.filter((item) => item.status === "Excepção").length}</strong><span>Excepções abertas</span></div></article></section><section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Fornecedor</TableHead><TableHead>PO</TableHead><TableHead>Valor</TableHead><TableHead>Match</TableHead><TableHead>Estado</TableHead><TableHead>Vencimento</TableHead><TableHead /></TableRow></TableHeader><TableBody>{list.map((invoice) => <TableRow key={invoice.id}><TableCell><strong>{invoice.id}</strong></TableCell><TableCell>{invoice.supplier}</TableCell><TableCell>{invoice.po}</TableCell><TableCell>{money(invoice.value)}</TableCell><TableCell>{invoice.match}</TableCell><TableCell><span className={statusClass(invoice.status)}>{invoice.status}</span></TableCell><TableCell>{invoice.due}</TableCell><TableCell><Button size="icon-sm" variant="ghost" onClick={() => setSelected(invoice)} aria-label={`Ver imagem e match de ${invoice.id}`}><Eye /></Button></TableCell></TableRow>)}</TableBody></Table></div></section>
-  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <InvoiceMatchSheet invoice={selected} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
+  <Sheet open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)}><SheetContent className="request-sheet sm:max-w-xl">{selected && <InvoiceMatchSheet invoice={selected} user={user} onValidateMatch={async (id, match) => { await onValidateMatch(id, match); setSelected((current) => (current && current.id === id ? { ...current, match, status: match === "3-way match" ? "Validada" : match === "Preço divergente" ? "Excepção" : "Pendente" } : current)); }} onUploadDocument={onUploadDocument} onDownloadDocument={onDownloadDocument} />}</SheetContent></Sheet>
   </>;
 }
 
@@ -1526,6 +1617,10 @@ const ACCESS_LEVEL_LABELS: Record<AccessLevel, string> = {
   company_admin: "Administrador da empresa",
   requester: "Requisitante",
   supplier: "Fornecedor",
+  technical_evaluator: "Avaliador Técnico",
+  consignee: "Consignatário (Recepção)",
+  finance_ap: "Financeiro (AP)",
+  supplier_governance: "Governance de Fornecedores",
 };
 
 type AdminUserRow = { id: number; name: string; email: string; role: string; accessLevel: AccessLevel; companyId: number | null; companyName: string | null; supplierId: number | null; supplierName: string | null };
@@ -1667,6 +1762,46 @@ function CreateUserForm({
 
 type TeamUserRow = { id: number; name: string; email: string; role: string; accessLevel: AccessLevel };
 
+type AuditLogEntry = {
+  id: number;
+  actorUserId: number | null;
+  actorName: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  before: string | null;
+  after: string | null;
+  metadata: string | null;
+  createdAt: string;
+};
+
+// Registo das operações críticas do RBAC — o que resta ao System Admin
+// depois de perder os poderes de negócio no redesenho de RBAC (ver
+// README §Personas e permissões). Só leitura, sem filtro nenhum na UI
+// para já (a API já aceita ?entityType=/?actorUserId=, ver
+// GET /api/admin/audit-log).
+function AuditLog() {
+  const [rows, setRows] = useState<AuditLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { entries } = await api<{ entries: AuditLogEntry[] }>("/api/admin/audit-log");
+        setRows(entries);
+      } catch {
+        toast.error("Não foi possível carregar o audit log");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  return <><PageHeader kicker="GOVERNANCE E CONFORMIDADE" title="Audit Log" description="Registo das operações críticas — homologação, risco/IBAN de fornecedor, aprovações, overrides e pagamentos." />
+    <section className="panel"><div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Quando</TableHead><TableHead>Quem</TableHead><TableHead>Acção</TableHead><TableHead>Entidade</TableHead><TableHead>Antes</TableHead><TableHead>Depois</TableHead></TableRow></TableHeader><TableBody>{rows.map((entry) => <TableRow key={entry.id}><TableCell>{formatSupportDate(entry.createdAt)}</TableCell><TableCell>{entry.actorName}</TableCell><TableCell><strong>{entry.action}</strong></TableCell><TableCell>{entry.entityType} #{entry.entityId}</TableCell><TableCell><code className="muted">{entry.before ?? "—"}</code></TableCell><TableCell><code className="muted">{entry.after ?? "—"}</code></TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><ShieldCheck /><h3>Sem registos ainda</h3></div>}</div></section>
+  </>;
+}
+
 // Equipa da própria empresa — só o Administrador da empresa a vê (ver
 // VIEW_ROLES), escopada por session.companyId no próprio handler
 // (GET/POST /api/company/users), nunca por um id escolhido aqui. Fecha o
@@ -1745,7 +1880,17 @@ type TenderRow = {
 };
 type TenderInviteRow = { supplierId: number; supplierName: string };
 type BidStatus = "submetida" | "vencedora" | "rejeitada";
-type TenderBidRow = { id: number; supplierId: number; supplierName: string; value: number; notes: string; status: BidStatus; submittedAt: string };
+type TenderBidRow = {
+  id: number;
+  supplierId: number;
+  supplierName: string;
+  value: number;
+  notes: string;
+  status: BidStatus;
+  submittedAt: string;
+  technicalScore: number | null;
+  technicalNotes: string;
+};
 type MyBidRow = { id: number; value: number; notes: string; status: BidStatus; submittedAt: string };
 type TenderDetail = { tender: TenderRow; invites: TenderInviteRow[]; bids: TenderBidRow[] } | { tender: TenderRow; myBid: MyBidRow | null };
 
@@ -1776,8 +1921,11 @@ function Tenders({ user, suppliersList }: { user: AuthUser; suppliersList: Suppl
   const [detailLoading, setDetailLoading] = useState(false);
 
   const isSupplier = user.accessLevel === "supplier";
-  const canCreate = user.accessLevel === "company_admin" || user.accessLevel === "system_admin";
-  const canManage = !isSupplier;
+  const canCreate = user.accessLevel === "company_admin";
+  // technical_evaluator só avalia tecnicamente, nunca adjudica/cancela
+  // (decisão comercial) — ver README §Personas e permissões.
+  const canManage = !isSupplier && user.accessLevel !== "technical_evaluator";
+  const canEvaluate = user.accessLevel === "technical_evaluator" || user.accessLevel === "coe_manager";
 
   const loadRows = async () => {
     try {
@@ -1823,7 +1971,7 @@ function Tenders({ user, suppliersList }: { user: AuthUser; suppliersList: Suppl
           <span className={tenderStatusPill(selected.status)}>{TENDER_STATUS_LABEL[selected.status]}</span>
           {selected.description && <p className="muted">{selected.description}</p>}
           {detailLoading && <p className="muted">A carregar…</p>}
-          {detail && isBuyerDetail(detail) && <BuyerTenderDetail detail={detail} canManage={canManage} onChanged={refreshDetail} />}
+          {detail && isBuyerDetail(detail) && <BuyerTenderDetail detail={detail} canManage={canManage} canEvaluate={canEvaluate} onChanged={refreshDetail} />}
           {detail && !isBuyerDetail(detail) && <SupplierTenderDetail tender={detail.tender} myBid={detail.myBid} onChanged={refreshDetail} />}
         </div>}
       </SheetContent>
@@ -1834,15 +1982,47 @@ function Tenders({ user, suppliersList }: { user: AuthUser; suppliersList: Suppl
 function BuyerTenderDetail({
   detail,
   canManage,
+  canEvaluate,
   onChanged,
 }: {
   detail: { tender: TenderRow; invites: TenderInviteRow[]; bids: TenderBidRow[] };
   canManage: boolean;
+  canEvaluate: boolean;
   onChanged: () => void;
 }) {
   const { tender, invites, bids } = detail;
   const [busy, setBusy] = useState(false);
+  const [evaluatingBidId, setEvaluatingBidId] = useState<number | null>(null);
+  const [scoreDraft, setScoreDraft] = useState("");
+  const [notesDraft, setNotesDraft] = useState("");
   const sortedBids = [...bids].sort((a, b) => a.value - b.value);
+
+  const startEvaluating = (bid: TenderBidRow) => {
+    setEvaluatingBidId(bid.id);
+    setScoreDraft(bid.technicalScore != null ? String(bid.technicalScore) : "");
+    setNotesDraft(bid.technicalNotes);
+  };
+
+  // Avaliação técnica — separada da decisão comercial de adjudicação (ver
+  // README §Personas e permissões e POST .../bids/:bidId/evaluate).
+  const saveEvaluation = async (bidId: number) => {
+    const score = Number(scoreDraft);
+    if (!Number.isFinite(score) || score < 0 || score > 100) {
+      toast.error("Indique uma pontuação entre 0 e 100");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api(`/api/tenders/${tender.id}/bids/${bidId}/evaluate`, { method: "POST", body: JSON.stringify({ technicalScore: score, technicalNotes: notesDraft.trim() }) });
+      toast.success("Avaliação técnica registada");
+      setEvaluatingBidId(null);
+      onChanged();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível registar a avaliação");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const award = async (bidId: number, overrideRisk?: boolean) => {
     setBusy(true);
@@ -1884,8 +2064,13 @@ function BuyerTenderDetail({
 
   return <>
     <div><p className="muted">Fornecedores convidados</p><p>{invites.map((invite) => invite.supplierName).join(", ") || "—"}</p></div>
-    <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Valor</TableHead><TableHead>Estado</TableHead>{tender.status === "aberto" && canManage && <TableHead></TableHead>}</TableRow></TableHeader><TableBody>
+    <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Fornecedor</TableHead><TableHead>Valor</TableHead><TableHead>Estado</TableHead>{canEvaluate && <TableHead>Avaliação técnica</TableHead>}{tender.status === "aberto" && canManage && <TableHead></TableHead>}</TableRow></TableHeader><TableBody>
       {sortedBids.map((bid) => <TableRow key={bid.id}><TableCell>{bid.supplierName}</TableCell><TableCell>{money(bid.value)}</TableCell><TableCell><span className={bid.status === "vencedora" ? "status status-green" : bid.status === "rejeitada" ? "status status-red" : "status status-slate"}>{bid.status === "submetida" ? "Submetida" : bid.status === "vencedora" ? "Vencedora" : "Rejeitada"}</span></TableCell>
+        {canEvaluate && <TableCell>
+          {evaluatingBidId === bid.id
+            ? <div className="header-actions"><Input type="number" min={0} max={100} value={scoreDraft} onChange={(event) => setScoreDraft(event.target.value)} placeholder="0-100" className="field-control" style={{ width: 80 }} /><Button size="sm" disabled={busy} onClick={() => saveEvaluation(bid.id)}>Guardar</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => setEvaluatingBidId(null)}>Cancelar</Button></div>
+            : <Button size="sm" variant="outline" onClick={() => startEvaluating(bid)}>{bid.technicalScore != null ? `${bid.technicalScore}/100` : "Avaliar"}</Button>}
+        </TableCell>}
         {tender.status === "aberto" && canManage && <TableCell><Button size="sm" disabled={busy} onClick={() => award(bid.id)}>Adjudicar</Button></TableCell>}
       </TableRow>)}
     </TableBody></Table>{bids.length === 0 && <p className="muted">Ainda sem propostas.</p>}</div>
@@ -2051,7 +2236,7 @@ function Contracts({
   const [busy, setBusy] = useState(false);
 
   const isSupplier = user.accessLevel === "supplier";
-  const canCreate = user.accessLevel === "company_admin" || user.accessLevel === "system_admin";
+  const canCreate = user.accessLevel === "company_admin";
   const canManage = !isSupplier;
 
   const loadRows = async () => {
@@ -2201,7 +2386,7 @@ function Catalog({ user, suppliersList }: { user: AuthUser; suppliersList: Suppl
   const [query, setQuery] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
 
-  const isCurator = user.accessLevel === "analyst" || user.accessLevel === "coe_manager" || user.accessLevel === "system_admin";
+  const isCurator = user.accessLevel === "analyst" || user.accessLevel === "coe_manager";
   const isSupplier = user.accessLevel === "supplier";
 
   const loadRows = async () => {
@@ -2342,7 +2527,14 @@ function clientInvoiceStatusClass(status: ClientInvoiceRow["status"]) {
   return "status status-amber";
 }
 
-function ClientBilling() {
+function ClientBilling({ user }: { user: AuthUser }) {
+  // /api/admin/companies e /api/admin/billing-rates continuam só
+  // System Admin (configuração) — coe_manager/finance_ap só aprovam
+  // facturas já geradas, nunca editam tarifas/retainer/NIF (ver README
+  // §Personas e permissões). Sem esta guarda, o Promise.all abaixo
+  // rebentava com um 403 para os dois níveis novos.
+  const isSystemAdmin = user.accessLevel === "system_admin";
+  const canApprove = user.accessLevel === "coe_manager" || user.accessLevel === "finance_ap";
   const [companiesList, setCompaniesList] = useState<CompanyRow[]>([]);
   const [rows, setRows] = useState<ClientInvoiceRow[]>([]);
   const [rates, setRates] = useState<BillingRateRow[]>([]);
@@ -2357,9 +2549,9 @@ function ClientBilling() {
   const load = async () => {
     try {
       const [companiesResponse, billingResponse, ratesResponse] = await Promise.all([
-        api<{ companies: CompanyRow[] }>("/api/admin/companies"),
+        isSystemAdmin ? api<{ companies: CompanyRow[] }>("/api/admin/companies") : Promise.resolve({ companies: [] }),
         api<{ clientInvoices: ClientInvoiceRow[] }>("/api/admin/billing"),
-        api<{ billingRates: BillingRateRow[] }>("/api/admin/billing-rates"),
+        isSystemAdmin ? api<{ billingRates: BillingRateRow[] }>("/api/admin/billing-rates") : Promise.resolve({ billingRates: [] }),
       ]);
       setCompaniesList(companiesResponse.companies);
       setRows(billingResponse.clientInvoices);
@@ -2486,8 +2678,8 @@ function ClientBilling() {
     }
   };
 
-  return <><PageHeader kicker="COBRANÇA DE ACTIVIDADE" title="Facturação" description="Retainer + POs + facturas do período, por empresa. Geração mensal automática ou sob pedido — sempre validada pelo System Admin antes de seguir para a contabilidade." />
-    <section className="panel">
+  return <><PageHeader kicker="COBRANÇA DE ACTIVIDADE" title="Facturação" description={isSystemAdmin ? "Retainer + POs + facturas do período, por empresa. Geração mensal automática ou sob pedido — validada por finance_ap/coe_manager antes de seguir para a contabilidade." : "Aprovação da facturação de actividade da Muntu às empresas clientes."} />
+    {isSystemAdmin && <section className="panel">
       <form onSubmit={generate} className="form-grid">
         <label className="form-field">Empresa<NativeSelect value={form.companyId} onChange={(event) => setForm((current) => ({ ...current, companyId: event.target.value }))} className="field-control">{companiesList.map((company) => <NativeSelectOption key={company.id} value={company.id}>{company.name}</NativeSelectOption>)}</NativeSelect></label>
         <label className="form-field">Início do período<Input type="date" value={form.periodStart} onChange={(event) => setForm((current) => ({ ...current, periodStart: event.target.value }))} /></label>
@@ -2495,19 +2687,19 @@ function ClientBilling() {
         <label className="form-field">Âmbito<NativeSelect value={form.scope} onChange={(event) => setForm((current) => ({ ...current, scope: event.target.value as "parcial" | "total" }))} className="field-control"><NativeSelectOption value="total">Total</NativeSelectOption><NativeSelectOption value="parcial">Parcial</NativeSelectOption></NativeSelect></label>
         <Button type="submit" className="btn-burgundy" disabled={generating}>{generating ? "A gerar…" : "Gerar factura"} <ArrowRight /></Button>
       </form>
-    </section>
+    </section>}
     <section className="panel">
-      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Empresa</TableHead><TableHead>Período</TableHead><TableHead>Origem</TableHead><TableHead>Total</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.id}</strong></TableCell><TableCell>{row.companyName}</TableCell><TableCell>{row.periodStart} a {row.periodEnd}</TableCell><TableCell>{row.generatedBy === "automatico" ? "Automática" : "Manual"} • {row.scope === "total" ? "Total" : "Parcial"}</TableCell><TableCell>{money(row.totalAmount)}</TableCell><TableCell><span className={clientInvoiceStatusClass(row.status)}>{CLIENT_INVOICE_STATUS_LABELS[row.status]}</span></TableCell><TableCell className="text-right">{row.status === "pendente_aprovacao" && <><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "approve")} aria-label={`Aprovar ${row.id}`}><Check /></Button><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "reject")} aria-label={`Rejeitar ${row.id}`}><XCircle /></Button></>}{row.status === "aprovada" && <Button size="sm" variant="outline" disabled={actingId === row.id} onClick={() => act(row.id, "send_to_accounting")}>Enviar à contabilidade</Button>}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Landmark /><h3>Sem facturas geradas</h3><p>Use o formulário acima para gerar a primeira.</p></div>}</div>
+      <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Factura</TableHead><TableHead>Empresa</TableHead><TableHead>Período</TableHead><TableHead>Origem</TableHead><TableHead>Total</TableHead><TableHead>Estado</TableHead><TableHead /></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.id}><TableCell><strong>{row.id}</strong></TableCell><TableCell>{row.companyName}</TableCell><TableCell>{row.periodStart} a {row.periodEnd}</TableCell><TableCell>{row.generatedBy === "automatico" ? "Automática" : "Manual"} • {row.scope === "total" ? "Total" : "Parcial"}</TableCell><TableCell>{money(row.totalAmount)}</TableCell><TableCell><span className={clientInvoiceStatusClass(row.status)}>{CLIENT_INVOICE_STATUS_LABELS[row.status]}</span></TableCell><TableCell className="text-right">{canApprove && row.status === "pendente_aprovacao" && <><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "approve")} aria-label={`Aprovar ${row.id}`}><Check /></Button><Button size="icon-sm" variant="ghost" disabled={actingId === row.id} onClick={() => act(row.id, "reject")} aria-label={`Rejeitar ${row.id}`}><XCircle /></Button></>}{canApprove && row.status === "aprovada" && <Button size="sm" variant="outline" disabled={actingId === row.id} onClick={() => act(row.id, "send_to_accounting")}>Enviar à contabilidade</Button>}</TableCell></TableRow>)}</TableBody></Table>{!loading && rows.length === 0 && <div className="empty-state"><Landmark /><h3>Sem facturas geradas</h3></div>}</div>
     </section>
-    <section className="panel">
+    {isSystemAdmin && <section className="panel">
       <div className="panel-heading"><div><p>CONFIGURAÇÃO</p><h2>Tarifas por unidade</h2></div></div>
       <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Tarifa</TableHead><TableHead>Valor (AOA)</TableHead><TableHead>Actualizada</TableHead></TableRow></TableHeader><TableBody>{rates.map((rate) => <TableRow key={rate.key}><TableCell><strong>{rate.label}</strong></TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={rate.amount} disabled={savingRateKey === rate.key} onBlur={(event) => { const value = Number(event.target.value); if (value !== rate.amount) saveRate(rate.key, value); }} className="rate-input" /></TableCell><TableCell>{new Date(rate.updatedAt).toLocaleDateString("pt-PT")}</TableCell></TableRow>)}</TableBody></Table>{!loading && rates.length === 0 && <div className="empty-state"><Landmark /><h3>Sem tarifas semeadas</h3><p>A facturação usa os valores por omissão do Estudo de Viabilidade até semear <code>billing_rates</code>.</p></div>}</div>
-    </section>
-    <section className="panel">
+    </section>}
+    {isSystemAdmin && <section className="panel">
       <div className="panel-heading"><div><p>CONFIGURAÇÃO</p><h2>Retainer e NIF por empresa</h2></div></div>
       <div className="responsive-table"><Table><TableHeader><TableRow><TableHead>Empresa</TableHead><TableHead>Domínio</TableHead><TableHead>Retainer mensal (AOA)</TableHead><TableHead>NIF (exportação SAF-T)</TableHead></TableRow></TableHeader><TableBody>{companiesList.map((company) => <TableRow key={company.id}><TableCell><strong>{company.name}</strong></TableCell><TableCell>{company.domain}</TableCell><TableCell><Input type="number" min={0} step={1} defaultValue={company.retainerAmount} disabled={savingCompanyId === company.id} onBlur={(event) => { const value = Number(event.target.value); if (value !== company.retainerAmount) saveRetainer(company.id, value); }} className="rate-input" /></TableCell><TableCell><Input defaultValue={company.taxId ?? ""} placeholder="Não definido" disabled={savingCompanyId === company.id} onBlur={(event) => { const value = event.target.value.trim(); if (value !== (company.taxId ?? "")) saveTaxId(company.id, value); }} className="rate-input" /></TableCell></TableRow>)}</TableBody></Table>{!loading && companiesList.length === 0 && <div className="empty-state"><Landmark /><h3>Sem empresas registadas</h3></div>}</div>
-    </section>
-    <section className="panel">
+    </section>}
+    {isSystemAdmin && <section className="panel">
       <div className="panel-heading"><div><p>FISCALIDADE</p><h2>Exportação AGT/SAF-T</h2></div></div>
       <p className="muted">Gera um ficheiro SAF-T (Header + Clientes + Facturas de venda) com as facturas de cliente aprovadas no período — todas as empresas facturadas precisam de ter NIF definido acima.</p>
       <form onSubmit={exportSaft} className="form-grid">
@@ -2515,7 +2707,7 @@ function ClientBilling() {
         <label className="form-field">Fim do período<Input type="date" value={saftPeriod.periodEnd} onChange={(event) => setSaftPeriod((current) => ({ ...current, periodEnd: event.target.value }))} /></label>
         <div className="header-actions"><Button type="submit" variant="outline" disabled={exportingSaft}><Download /> {exportingSaft ? "A gerar…" : "Exportar SAF-T"}</Button></div>
       </form>
-    </section>
+    </section>}
   </>;
 }
 
@@ -2580,7 +2772,7 @@ function Applications({
     (async () => {
       try {
         const { approvers } = await api<{ approvers: Approver[] }>("/api/approvers");
-        setReviewers(approvers.filter((item) => item.accessLevel === "coe_manager" || item.accessLevel === "system_admin"));
+        setReviewers(approvers.filter((item) => item.accessLevel === "coe_manager" || item.accessLevel === "supplier_governance"));
       } catch {
         // silencioso — a atribuição fica só sem opções, o resto da página continua a funcionar
       }

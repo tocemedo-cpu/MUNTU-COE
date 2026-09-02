@@ -26,6 +26,10 @@ export const DEFAULT_ROLE_LABEL: Record<AccessLevel, string> = {
   supplier: "Fornecedor",
   company_admin: "Administrador da empresa",
   requester: "Requisitante",
+  technical_evaluator: "Avaliador Técnico",
+  consignee: "Consignatário (Recepção)",
+  finance_ap: "Financeiro (AP)",
+  supplier_governance: "Governance de Fornecedores",
 };
 
 export type ProvisionUserParams = {

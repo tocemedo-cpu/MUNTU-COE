@@ -24,8 +24,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 // Única transição suportada é terminar antecipadamente — a expiração em
 // si nunca é uma transição gravada, é sempre calculada a partir de
 // end_date (ver comentário em db/schema.ts).
+// Procurement, fora do system_admin desde o redesenho de RBAC (ver README
+// §Personas e permissões).
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;

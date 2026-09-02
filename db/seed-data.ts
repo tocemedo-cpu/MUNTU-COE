@@ -20,6 +20,13 @@ const demoUsers = [
   { name: "Sofia Neto", email: "sofia.neto@muntucoe.ao", password: "Muntu2026!", role: "Analista (Buyer/AP)", initials: "SN", accessLevel: "analyst" as const },
   { name: "Rui Domingos", email: "rui.domingos@muntucoe.ao", password: "Muntu2026!", role: "System Admin", initials: "RD", accessLevel: "system_admin" as const },
   { name: "Carlos Mateus", email: "carlos.mateus@kwanzaindustrial.ao", password: "Muntu2026!", role: "Fornecedor", initials: "CM", accessLevel: "supplier" as const },
+  // Os 4 níveis novos do redesenho de RBAC (ver README §Personas e
+  // permissões) — um por papel, para haver uma conta de demonstração
+  // funcional para cada um sem SQL directo.
+  { name: "Beatriz Sousa", email: "beatriz.sousa@muntucoe.ao", password: "Muntu2026!", role: "Avaliador Técnico", initials: "BS", accessLevel: "technical_evaluator" as const },
+  { name: "Tomás Kiala", email: "tomas.kiala@operadora.ao", password: "Muntu2026!", role: "Consignatário (Recepção)", initials: "TK", accessLevel: "consignee" as const },
+  { name: "Elsa Ferreira", email: "elsa.ferreira@muntucoe.ao", password: "Muntu2026!", role: "Financeiro (AP)", initials: "EF", accessLevel: "finance_ap" as const },
+  { name: "Nuno Cardoso", email: "nuno.cardoso@muntucoe.ao", password: "Muntu2026!", role: "Governance de Fornecedores", initials: "NC", accessLevel: "supplier_governance" as const },
 ];
 
 // createdAt/decidedAt reais (não só o texto "submitted") para que o SLA%,
@@ -129,7 +136,9 @@ export async function seedIfEmpty(db: Db) {
       demoUsers.map(async (user) => ({
         ...user,
         password: await hashPassword(user.password),
-        companyId: user.accessLevel === "company_admin" || user.accessLevel === "requester" ? company.id : null,
+        // consignee é escopado à própria empresa, mesma regra de
+        // company_admin/requester — ver README §Personas e permissões.
+        companyId: ["company_admin", "requester", "consignee"].includes(user.accessLevel) ? company.id : null,
         supplierId: user.accessLevel === "supplier" ? (supplierIdByName.get("Kwanza Industrial") ?? null) : null,
       }))
     );

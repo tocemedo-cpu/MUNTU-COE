@@ -167,6 +167,13 @@ create table if not exists public.bids (
   unique (tender_id, supplier_id)
 );
 
+-- Avaliação técnica (technical_evaluator) — separada da adjudicação
+-- comercial, que continua a não exigir esta nota para avançar.
+alter table public.bids add column if not exists technical_score integer;
+alter table public.bids add column if not exists technical_notes text not null default '';
+alter table public.bids add column if not exists technically_evaluated_by_user_id bigint references public.users (id);
+alter table public.bids add column if not exists technically_evaluated_at timestamptz;
+
 -- Contrato/Call-off — acordo com validade e tecto de valor, distinto de
 -- uma PO pontual. `status` só regista o que uma pessoa decidiu (terminar
 -- antecipadamente); "a expirar"/"expirado" nunca são gravados — são
@@ -250,6 +257,11 @@ alter table public.invoices add column if not exists company_id bigint reference
 alter table public.invoices add column if not exists tier text not null default 'assistida'; -- limpa | assistida | excecao
 alter table public.invoices add column if not exists created_at timestamptz not null default now();
 
+-- Validação do 3-way match (finance_ap/coe_manager) — ver PATCH
+-- /api/invoices/:id.
+alter table public.invoices add column if not exists matched_by_user_id bigint references public.users (id);
+alter table public.invoices add column if not exists matched_at timestamptz;
+
 create table if not exists public.exceptions (
   id text primary key,
   title text not null,
@@ -289,6 +301,7 @@ alter table public.payment_batches add column if not exists company_id bigint re
 -- Preenchido só quando /api/admin/payment-release/run libertou o lote
 -- sozinho — distingue de uma libertação manual (PATCH /api/payments/:id).
 alter table public.payment_batches add column if not exists auto_released_at timestamptz;
+alter table public.payment_batches add column if not exists released_by_user_id bigint references public.users (id);
 
 create table if not exists public.documents (
   id bigint generated always as identity primary key,
@@ -435,6 +448,22 @@ create table if not exists public.client_invoice_lines (
   amount bigint not null
 );
 
+-- Registo das operações críticas do RBAC (homologação, mudança de risco/
+-- IBAN de fornecedor, override de risco alto, aprovação de pedido/PO/
+-- pagamento/facturação ao cliente) — ver lib/audit.ts#recordAuditEvent.
+-- actor_user_id nulo cobre acções do agendador externo (via CRON_SECRET).
+create table if not exists public.audit_log (
+  id bigint generated always as identity primary key,
+  actor_user_id bigint references public.users (id),
+  action text not null,
+  entity_type text not null,
+  entity_id text not null,
+  before text,
+  after text,
+  metadata text,
+  created_at timestamptz not null default now()
+);
+
 -- -----------------------------------------------------------------
 -- Índices úteis para pesquisa/filtros
 -- -----------------------------------------------------------------
@@ -479,6 +508,9 @@ create index if not exists support_tickets_company_id_idx on public.support_tick
 create index if not exists support_tickets_user_id_idx on public.support_tickets (user_id);
 create index if not exists support_tickets_assigned_to_user_id_idx on public.support_tickets (assigned_to_user_id);
 create index if not exists support_messages_ticket_id_idx on public.support_messages (ticket_id);
+create index if not exists audit_log_entity_idx on public.audit_log (entity_type, entity_id);
+create index if not exists audit_log_actor_user_id_idx on public.audit_log (actor_user_id);
+create index if not exists audit_log_created_at_idx on public.audit_log (created_at);
 
 -- -----------------------------------------------------------------
 -- Row Level Security
@@ -513,6 +545,7 @@ alter table public.bids enable row level security;
 alter table public.contracts enable row level security;
 alter table public.po_events enable row level security;
 alter table public.catalog_items enable row level security;
+alter table public.audit_log enable row level security;
 
 drop policy if exists "public read requests" on public.requests;
 drop policy if exists "public write requests" on public.requests;
@@ -558,8 +591,9 @@ create policy "public write documents" on public.documents for insert with check
 -- `consumed_tokens`, `tenders`, `tender_invites`, `bids` (propostas de
 -- fornecedores concorrentes nunca podem ficar legíveis por anon key),
 -- `contracts`, `catalog_items` (valores, termos contratuais e preços
--- pré-negociados são dados comerciais sensíveis) nem `po_events`
--- (histórico operacional interno): mantém-nas
+-- pré-negociados são dados comerciais sensíveis), `po_events`
+-- (histórico operacional interno) nem `audit_log` (registo de auditoria —
+-- só o System Admin lê isto, e só por uma rota de servidor): mantém-nas
 -- ilegíveis pela API pública/anon key (segredos de SSO, dados financeiros,
 -- dados de candidatos, bytes reais dos
 -- ficheiros carregados e conteúdo de pedidos de suporte dos utilizadores).

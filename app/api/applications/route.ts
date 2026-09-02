@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { applications } from "@/db/schema";
 import { APPLICATION_REVIEW_ROLES, APPLICATION_TOKEN_TTL_SECONDS, type ApplicationTokenPayload } from "@/lib/application-access";
@@ -25,7 +25,13 @@ export async function GET(request: Request) {
   }
 
   const db = getDb();
-  const rows = await db.select().from(applications).orderBy(desc(applications.createdAt));
+  // supplier_governance só controla o lado fornecedor — nunca vê
+  // candidaturas de empresa cliente na lista (mesma regra aplicada em
+  // PATCH/.../homologate).
+  const rows =
+    session.accessLevel === "supplier_governance"
+      ? await db.select().from(applications).where(eq(applications.kind, "fornecedor")).orderBy(desc(applications.createdAt))
+      : await db.select().from(applications).orderBy(desc(applications.createdAt));
   return Response.json({ applications: rows });
 }
 

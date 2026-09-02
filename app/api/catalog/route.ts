@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   if (session.accessLevel === "supplier") {
     if (session.supplierId == null) return Response.json({ items: [] });
     conditions.push(eq(catalogItems.supplierId, session.supplierId));
-  } else if (!["analyst", "coe_manager", "system_admin"].includes(session.accessLevel)) {
+  } else if (!["analyst", "coe_manager"].includes(session.accessLevel)) {
     conditions.push(eq(catalogItems.active, true));
   }
 
@@ -32,10 +32,10 @@ export async function GET(request: Request) {
 
 // A Muntu cura o catálogo, não a empresa cliente nem o próprio fornecedor
 // — os preços pré-negociados vêm de uma negociação feita pela equipa de
-// sourcing, o mesmo motivo por que só analyst/coe_manager/system_admin
-// editam `suppliers.passport`/`risk` em vez do próprio fornecedor.
+// sourcing. Procurement, fora do system_admin desde o redesenho de RBAC
+// (ver README §Personas e permissões).
 export async function POST(request: Request) {
-  const forbidden = forbidUnless(request, ["analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["analyst", "coe_manager"]);
   if (forbidden) return forbidden;
 
   const session = getSession(request);

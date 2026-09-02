@@ -1,11 +1,13 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { purchaseOrders, requests, suppliers } from "@/db/schema";
+import { recordAuditEvent } from "@/lib/audit";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { classifyPoTier } from "@/lib/billing";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { recordPoEvent } from "@/lib/po-events";
 import { checkSupplierRiskBlock } from "@/lib/risk-block";
+import { assertDifferentActor } from "@/lib/sod";
 import { parseJsonBody, requestActionSchema } from "@/lib/validation";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -18,18 +20,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (session.accessLevel === "requester" && row.ownerUserId !== session.userId) {
     return Response.json({ error: "Sem permissão para aceder a este pedido." }, { status: 403 });
   }
-  // Mesmo motivo do GET da lista (app/api/requests/route.ts): analyst e
-  // supplier não têm noção de "dono" de pedido nenhuma — sem esta guarda,
-  // um id adivinhado/enumerado devolvia o pedido de qualquer empresa.
-  if (session.accessLevel === "analyst" || session.accessLevel === "supplier") {
+  // Mesmo motivo do GET da lista (app/api/requests/route.ts): nenhum
+  // destes níveis tem noção de "dono" de pedido — sem esta guarda, um id
+  // adivinhado/enumerado devolvia o pedido de qualquer empresa.
+  const NO_REQUEST_ACCESS: (typeof session.accessLevel)[] = ["analyst", "supplier", "technical_evaluator", "consignee", "finance_ap", "supplier_governance"];
+  if (NO_REQUEST_ACCESS.includes(session.accessLevel)) {
     return Response.json({ error: "Sem permissão para aceder a este pedido." }, { status: 403 });
   }
 
   return Response.json({ request: row });
 }
 
+// Aprovação de pedido — governance de negócio, fora do system_admin desde
+// o redesenho de RBAC (ver README §Personas e permissões); system_admin
+// mantém IAM/config/auditoria, nunca decide sobre o P2P em si.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["company_admin", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["company_admin", "coe_manager"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;
@@ -42,6 +48,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const approve = parsed.data.action === "approve";
   const session = getSession(request);
+
+  // Segregação de funções: quem aprova/rejeita nunca pode ser quem criou
+  // o pedido — sem isto, um company_admin podia aprovar o seu próprio
+  // pedido sozinho.
+  const selfApproval = assertDifferentActor(session.userId, existing.ownerUserId, "Não pode aprovar/rejeitar o seu próprio pedido.");
+  if (selfApproval) return selfApproval;
 
   // Aprovar um pedido de um fornecedor de risco "Alto" fica bloqueado por
   // omissão — ver lib/risk-block.ts. Verificado antes de decidir nada:
@@ -98,6 +110,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       });
     }
   }
+
+  await recordAuditEvent(db, {
+    actorUserId: session.userId,
+    action: approve ? "request.approve" : "request.reject",
+    entityType: "request",
+    entityId: id,
+    before: { status: existing.status },
+    after: { status: updated.status },
+    metadata: riskOverriddenByUserId ? { riskOverride: true } : undefined,
+  });
 
   return Response.json({ request: updated });
 }

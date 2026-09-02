@@ -122,8 +122,14 @@ describe("GET /api/dashboard — company_admin só vê a sua própria empresa", 
 // estado de qualquer fornecedor via chamada directa à API, apesar de a
 // interface nunca lhe mostrar esse formulário e de essa avaliação ser só
 // da Muntu (analyst/coe_manager/system_admin).
-describe("PATCH /api/suppliers/:id — company_admin não edita avaliação da Muntu", () => {
-  it("aplica iban/bic mas ignora risk/passport/status vindos de um company_admin", async () => {
+// Redesenho de RBAC (ver README §Personas e permissões): risco/passport/
+// estado/IBAN de fornecedor passaram a ser gestão de risco/vendor
+// governance — só coe_manager e supplier_governance. company_admin
+// (cliente) e analyst (buyer) perderam qualquer PATCH sobre fornecedor,
+// mesmo só IBAN/BIC — antes desta mudança, company_admin ainda conseguia
+// a conta bancária e analyst editava tudo.
+describe("PATCH /api/suppliers/:id — company_admin e analyst já não editam fornecedor nenhum", () => {
+  it("company_admin recebe 403, mesmo só para iban/bic — nunca actualiza a linha", async () => {
     const db = getDb();
     const [supplier] = await db
       .insert(suppliers)
@@ -134,23 +140,18 @@ describe("PATCH /api/suppliers/:id — company_admin não edita avaliação da M
       jsonRequest(`http://localhost/api/suppliers/${supplier.id}`, {
         method: "PATCH",
         session: { userId: 1, accessLevel: "company_admin", companyId: 1 },
-        body: { iban: "AO06004000000198765432101", bic: "BFAAAOLU", risk: "Alto", passport: 0, status: "Bloqueado" },
+        body: { iban: "AO06004000000198765432101", bic: "BFAAAOLU" },
       }),
       { params: Promise.resolve({ id: String(supplier.id) }) }
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(403);
     const [stored] = await db.select().from(suppliers).where(eq(suppliers.id, supplier.id));
-    expect(stored.iban).toBe("AO06004000000198765432101");
-    expect(stored.bic).toBe("BFAAAOLU");
-    // supplierCompanyAdminUpdateSchema não conhece estes campos — zod
-    // descarta-os (strip por omissão), nunca chegam ao update().
-    expect(stored.risk).toBe("Baixo");
-    expect(stored.passport).toBe(40);
-    expect(stored.status).toBe("Activo");
+    expect(stored.iban).toBeNull();
+    expect(stored.bic).toBeNull();
   });
 
-  it("analyst continua a poder editar risk/passport/status (avaliação interna da Muntu)", async () => {
+  it("analyst recebe 403 ao tentar editar risk/passport/status", async () => {
     const db = getDb();
     const [supplier] = await db
       .insert(suppliers)
@@ -166,10 +167,44 @@ describe("PATCH /api/suppliers/:id — company_admin não edita avaliação da M
       { params: Promise.resolve({ id: String(supplier.id) }) }
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(403);
+    const [stored] = await db.select().from(suppliers).where(eq(suppliers.id, supplier.id));
+    expect(stored.risk).toBe("Baixo");
+    expect(stored.passport).toBe(40);
+    expect(stored.status).toBe("Activo");
+  });
+
+  it("coe_manager e supplier_governance continuam a editar risk/passport/status/iban livremente", async () => {
+    const db = getDb();
+    const [supplier] = await db
+      .insert(suppliers)
+      .values({ name: `Fornecedor Governance ${Date.now()}`, category: "Geral", risk: "Baixo", passport: 40, status: "Activo" })
+      .returning();
+
+    const coeManagerResponse = await patchSupplier(
+      jsonRequest(`http://localhost/api/suppliers/${supplier.id}`, {
+        method: "PATCH",
+        session: { userId: 3, accessLevel: "coe_manager" },
+        body: { risk: "Alto" },
+      }),
+      { params: Promise.resolve({ id: String(supplier.id) }) }
+    );
+    expect(coeManagerResponse.status).toBe(200);
+
+    const governanceResponse = await patchSupplier(
+      jsonRequest(`http://localhost/api/suppliers/${supplier.id}`, {
+        method: "PATCH",
+        session: { userId: 4, accessLevel: "supplier_governance" },
+        body: { passport: 90, status: "Aprovado", iban: "AO06004000000198765432101" },
+      }),
+      { params: Promise.resolve({ id: String(supplier.id) }) }
+    );
+    expect(governanceResponse.status).toBe(200);
+
     const [stored] = await db.select().from(suppliers).where(eq(suppliers.id, supplier.id));
     expect(stored.risk).toBe("Alto");
     expect(stored.passport).toBe(90);
     expect(stored.status).toBe("Aprovado");
+    expect(stored.iban).toBe("AO06004000000198765432101");
   });
 });

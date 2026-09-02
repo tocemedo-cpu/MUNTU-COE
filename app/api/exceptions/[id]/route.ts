@@ -4,8 +4,10 @@ import { exceptions } from "@/db/schema";
 import { forbidUnless, getSession } from "@/lib/authz";
 import { exceptionActionSchema, parseJsonBody } from "@/lib/validation";
 
+// Procurement, fora do system_admin desde o redesenho de RBAC (ver README
+// §Personas e permissões).
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;

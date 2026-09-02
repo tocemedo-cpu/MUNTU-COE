@@ -37,9 +37,11 @@ export async function GET(request: Request) {
 
 // Abre um tender e já convida os fornecedores indicados — as duas coisas
 // juntas porque um tender sem nenhum fornecedor convidado não tem
-// utilidade nenhuma (ninguém consegue propor).
+// utilidade nenhuma (ninguém consegue propor). Procurement, fora do
+// system_admin desde o redesenho de RBAC (ver README §Personas e
+// permissões); technical_evaluator só avalia, nunca abre sourcing.
 export async function POST(request: Request) {
-  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager"]);
   if (forbidden) return forbidden;
 
   const session = getSession(request);

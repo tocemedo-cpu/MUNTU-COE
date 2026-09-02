@@ -7,7 +7,7 @@ import { catalogItemUpdateSchema, parseJsonBody } from "@/lib/validation";
 // Actualização parcial (incluindo activar/desactivar) — só quem cura o
 // catálogo, mesma regra do POST.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["analyst", "coe_manager"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;

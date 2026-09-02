@@ -50,17 +50,34 @@ function isOptionalAuthPath(pathname: string): boolean {
 // via lib/authz.ts. Um prefixo sem entrada aqui fica aberto a qualquer
 // sessão válida (comportamento pré-existente para suppliers, POs, etc.).
 const ROUTE_ACCESS: { prefix: string; allow: AccessLevel[] }[] = [
+  // Mais específico primeiro — `.find()` devolve a primeira entrada cujo
+  // prefixo bate certo, e "/api/admin/billing-rates" também começa por
+  // "/api/admin/billing" (string, não segmento de path), por isso a regra
+  // de billing-rates tem de vir antes da de billing para não ser
+  // apanhada por engano pela regra mais larga.
+  { prefix: "/api/admin/billing-rates", allow: ["system_admin"] },
+  // Aprovação da facturação da Muntu ao cliente — separada do System
+  // Admin (ver README §Personas e permissões); tarifas (billing-rates,
+  // regra acima) continuam só System Admin, é configuração, não decisão
+  // de negócio.
+  { prefix: "/api/admin/billing", allow: ["finance_ap", "coe_manager"] },
   { prefix: "/api/admin", allow: ["system_admin"] },
   { prefix: "/api/dashboard", allow: ["company_admin", "coe_manager", "system_admin"] },
-  { prefix: "/api/purchase-orders", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
-  { prefix: "/api/receipts", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
-  { prefix: "/api/invoices", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
+  // consignee confirma entrega (transição "deliver") — o resto das
+  // transições e o âmbito por empresa/fornecedor continuam a ser
+  // verificados no próprio handler.
+  { prefix: "/api/purchase-orders", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier", "consignee"] },
+  { prefix: "/api/receipts", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier", "consignee"] },
+  { prefix: "/api/invoices", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier", "finance_ap"] },
   { prefix: "/api/exceptions", allow: ["company_admin", "analyst", "coe_manager", "system_admin"] },
-  { prefix: "/api/payments", allow: ["company_admin", "analyst", "coe_manager", "system_admin"] },
+  { prefix: "/api/payments", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "finance_ap"] },
   // Sourcing (tenders/RFQ) — supplier entra para poder propor às suas
-  // próprias oportunidades; o âmbito por convite/empresa é feito no
-  // handler (nunca a lista completa de tenders de outra empresa/fornecedor).
-  { prefix: "/api/tenders", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
+  // próprias oportunidades; technical_evaluator entra só para ver e
+  // avaliar tecnicamente, nunca para adjudicar (POST/PATCH têm a sua
+  // própria lista mais restrita no handler); o âmbito por convite/empresa
+  // é feito no handler (nunca a lista completa de tenders de outra
+  // empresa/fornecedor).
+  { prefix: "/api/tenders", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier", "technical_evaluator"] },
   { prefix: "/api/contracts", allow: ["company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
   { prefix: "/api/catalog", allow: ["requester", "company_admin", "analyst", "coe_manager", "system_admin", "supplier"] },
   // Equipa da própria empresa (convidar/listar colegas) — só o

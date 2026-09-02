@@ -1,5 +1,22 @@
 import { z, type ZodSchema } from "zod";
+import type { AccessLevel } from "./session";
 import { SUPPORT_CATEGORIES, SUPPORT_PRIORITIES, SUPPORT_STATUSES } from "./support";
+
+// Repetido aqui (não importado de session.ts como um array) porque zod
+// precisa de uma tupla literal para z.enum — mas tipado contra
+// AccessLevel para o compilador acusar se um nível for esquecido aqui.
+const ACCESS_LEVELS = [
+  "system_admin",
+  "coe_manager",
+  "analyst",
+  "supplier",
+  "company_admin",
+  "requester",
+  "technical_evaluator",
+  "consignee",
+  "finance_ap",
+  "supplier_governance",
+] as const satisfies readonly AccessLevel[];
 
 /** Como parseJsonBody, mas para um corpo já lido — para rotas que
  * precisam de olhar para o JSON antes de saber contra que schema validar
@@ -53,9 +70,9 @@ export const requestCreateSchema = z.object({
 
 // overrideRisk: confirmação explícita para aprovar mesmo com o fornecedor
 // classificado risco "Alto" — sem isto, a aprovação é bloqueada (ver
-// PATCH /api/requests/:id). Só company_admin/coe_manager/system_admin
-// chegam a este ponto, mas só coe_manager/system_admin podem de facto
-// usar o override (verificado no handler, não aqui).
+// PATCH /api/requests/:id). Só coe_manager/company_admin chegam a este
+// ponto, mas só coe_manager pode de facto usar o override (verificado no
+// handler, não aqui — ver lib/risk-block.ts).
 export const requestActionSchema = z.object({
   action: z.enum(["approve", "reject"]),
   overrideRisk: z.boolean().optional(),
@@ -66,8 +83,10 @@ export const supplierCreateSchema = z.object({
   category: z.string().trim().max(120).optional(),
 });
 
-// Edição interna (Muntu): pode mexer em tudo, incluindo passport/risco/
-// estado — são avaliações da Muntu, não auto-declaradas pelo fornecedor.
+// Edição interna (coe_manager/supplier_governance — gestão de risco e
+// vendor governance, ver README §Personas e permissões): pode mexer em
+// tudo, incluindo passport/risco/estado/IBAN — são avaliações da Muntu,
+// não auto-declaradas pelo fornecedor nem pelo cliente que o contrata.
 export const supplierUpdateSchema = z.object({
   category: z.string().trim().max(120).optional(),
   local: z.string().trim().max(20).optional(),
@@ -85,19 +104,6 @@ export const supplierUpdateSchema = z.object({
 export const supplierSelfUpdateSchema = z.object({
   category: z.string().trim().max(120).optional(),
   local: z.string().trim().max(20).optional(),
-});
-
-// Edição por um company_admin (cliente): pode mexer na conta bancária do
-// fornecedor com quem trabalha (é o único ecrã que expõe isto, via
-// SupplierPassportSheet) e nos mesmos campos auto-declaráveis do próprio
-// fornecedor — mas nunca em passport/risco/estado, que continuam a ser só
-// avaliação interna da Muntu (analyst/coe_manager/system_admin), nunca do
-// cliente sobre o fornecedor de outra empresa.
-export const supplierCompanyAdminUpdateSchema = z.object({
-  category: z.string().trim().max(120).optional(),
-  local: z.string().trim().max(20).optional(),
-  iban: z.string().trim().max(34).optional(),
-  bic: z.string().trim().max(11).optional(),
 });
 
 export const receiptActionSchema = z.object({
@@ -121,7 +127,7 @@ export const paymentActionSchema = z.object({
 });
 
 export const userAccessUpdateSchema = z.object({
-  accessLevel: z.enum(["system_admin", "coe_manager", "analyst", "supplier", "company_admin", "requester"]),
+  accessLevel: z.enum(ACCESS_LEVELS),
   companyId: z.number().int().positive().nullable().optional(),
   supplierId: z.number().int().positive().nullable().optional(),
 });
@@ -197,7 +203,7 @@ export const adminUserCreateSchema = z
     name: z.string().trim().min(1, "O nome é obrigatório").max(200),
     email: z.string().trim().min(1, "O e-mail é obrigatório").email("E-mail inválido"),
     role: z.string().trim().max(120).optional(),
-    accessLevel: z.enum(["system_admin", "coe_manager", "analyst", "supplier", "company_admin", "requester"]),
+    accessLevel: z.enum(ACCESS_LEVELS),
     companyId: z.number().int().positive().optional(),
     supplierId: z.number().int().positive().optional(),
   })
@@ -304,4 +310,21 @@ export const catalogItemUpdateSchema = z.object({
   unitPrice: z.number().int().min(0).max(1_000_000_000).optional(),
   unit: z.string().trim().min(1).max(20).optional(),
   active: z.boolean().optional(),
+});
+
+// Avaliação técnica de uma proposta (technical_evaluator) — separada da
+// decisão comercial de adjudicação, ver POST /api/tenders/:id/bids/:bidId/evaluate.
+export const bidEvaluateSchema = z.object({
+  technicalScore: z.number().int().min(0).max(100),
+  technicalNotes: z.string().trim().max(2000).optional().default(""),
+});
+
+// Validação do 3-way match de uma factura (finance_ap/coe_manager) — ver
+// PATCH /api/invoices/:id. status é opcional: sem indicação explícita, a
+// rota deriva um valor por omissão a partir de `match` (mesma lógica de
+// lib/billing-tiers.ts#classifyInvoiceTier, que já assume estes valores).
+export const invoiceMatchActionSchema = z.object({
+  action: z.literal("validate_match"),
+  match: z.enum(["3-way match", "Preço divergente", "Receção em falta"]),
+  status: z.enum(["Validada", "Excepção", "Pendente", "Pago"]).optional(),
 });

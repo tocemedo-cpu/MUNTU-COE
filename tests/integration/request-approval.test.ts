@@ -99,7 +99,7 @@ describe("PATCH /api/requests/:id (approve/reject)", () => {
     const response = await patchRequest(
       jsonRequest(`http://localhost/api/requests/${request.id}`, {
         method: "PATCH",
-        session: { userId: approver.id, accessLevel: "system_admin", companyId: null },
+        session: { userId: approver.id, accessLevel: "coe_manager", companyId: null },
         body: { action: "approve" },
       }),
       { params: Promise.resolve({ id: request.id }) }
@@ -240,7 +240,7 @@ describe("PATCH /api/requests/:id — bloqueio por risco alto", () => {
     expect(pos).toHaveLength(0);
   });
 
-  it("blocks coe_manager/system_admin without overrideRisk, but lets them through with it, marking the PO as overridden", async () => {
+  it("blocks coe_manager without overrideRisk, but lets them through with it, marking the PO as overridden", async () => {
     const { company, request } = await makeHighRiskCompanyAndRequest("2");
     const db = getDb();
     // purchase_orders.risk_overridden_by_user_id tem uma FK real para

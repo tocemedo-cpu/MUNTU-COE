@@ -22,15 +22,20 @@ export async function GET(request: Request) {
     return Response.json({ purchaseOrders: rows });
   }
 
+  // consignee é escopado à própria empresa, mesma regra de company_admin —
+  // sem isto, caía no "senão" abaixo e via POs de todas as empresas.
+  const isCompanyScoped = session.accessLevel === "company_admin" || session.accessLevel === "consignee";
   const rows =
-    session.accessLevel === "company_admin" && session.companyId != null
+    isCompanyScoped && session.companyId != null
       ? await db
           .select()
           .from(purchaseOrders)
           .where(eq(purchaseOrders.companyId, session.companyId))
           .orderBy(desc(purchaseOrders.createdAt))
           .limit(limit)
-      : await db.select().from(purchaseOrders).orderBy(desc(purchaseOrders.createdAt)).limit(limit);
+      : isCompanyScoped
+        ? []
+        : await db.select().from(purchaseOrders).orderBy(desc(purchaseOrders.createdAt)).limit(limit);
 
   return Response.json({ purchaseOrders: rows });
 }

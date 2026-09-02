@@ -9,7 +9,7 @@ function forbiddenForPo(
   session: ReturnType<typeof getSession>,
   po: typeof purchaseOrders.$inferSelect,
 ): boolean {
-  if (session.accessLevel === "company_admin") return po.companyId !== session.companyId;
+  if (session.accessLevel === "company_admin" || session.accessLevel === "consignee") return po.companyId !== session.companyId;
   if (session.accessLevel === "supplier") return po.supplierId !== session.supplierId;
   return false;
 }
@@ -58,8 +58,12 @@ const TRANSITIONS: Record<
   },
 };
 
+// Procurement, fora do system_admin desde o redesenho de RBAC (ver README
+// §Personas e permissões). consignee entra só para o GRN (confirmar
+// entrega) — nunca para expediting/excepção, que continuam do lado
+// buyer/AP.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "system_admin"]);
+  const forbidden = forbidUnless(request, ["company_admin", "analyst", "coe_manager", "consignee"]);
   if (forbidden) return forbidden;
 
   const { id } = await params;
@@ -67,10 +71,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const parsed = await parseJsonBody(request, poActionSchema);
   if (!parsed.success) return parsed.response;
 
+  const session = getSession(request);
+  if (session.accessLevel === "consignee" && parsed.data.action !== "deliver") {
+    return Response.json({ error: "Um consignee só pode confirmar a entrega (GRN)." }, { status: 403 });
+  }
+
   const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
   if (!po) return Response.json({ error: "PO não encontrada" }, { status: 404 });
 
-  const session = getSession(request);
   if (forbiddenForPo(session, po)) {
     return Response.json({ error: "Sem permissão para aceder a esta PO." }, { status: 403 });
   }
