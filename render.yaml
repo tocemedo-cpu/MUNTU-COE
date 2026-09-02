@@ -8,16 +8,6 @@ envVarGroups:
       - key: CRON_SECRET
         generateValue: true
 
-databases:
-  # Base de dados só para o ambiente de teste (staging) — nunca a de
-  # produção. Plano free do Postgres do Render expira ao fim de 30 dias;
-  # antes disso, ou se recria (perde os dados, aceitável para staging) ou
-  # se muda para um plano pago no dashboard.
-  - name: muntu-coe-staging-db
-    plan: free
-    databaseName: muntu_coe_staging
-    user: muntu_coe_staging
-
 services:
   - type: web
     name: muntu-coe-portal
@@ -73,10 +63,12 @@ services:
       - key: SUPABASE_STORAGE_BUCKET
         sync: false
 
-  # Ambiente de teste — mesmo código, base de dados própria
-  # (muntu-coe-staging-db, nunca a de produção), branch "staging" em vez
-  # de "main". Fluxo: alterações vão primeiro para "staging", testam-se
-  # aqui à vontade (incluindo mudanças de RBAC/permissões, que mudam
+  # Ambiente de teste — mesmo código, base de dados própria, branch
+  # "staging" em vez de "main". A base é um projecto Supabase à parte
+  # (nunca o de produção) — DATABASE_URL cola-se à mão no dashboard do
+  # Render, tal como acontece no muntu-coe-portal (sync: false abaixo).
+  # Fluxo: alterações vão primeiro para "staging", testam-se aqui à
+  # vontade (incluindo mudanças de RBAC/permissões, que mudam
   # comportamento imediatamente para contas reais em produção), só depois
   # se faz merge para "main". Sem Cron Jobs próprios de propósito — ver
   # nota abaixo.
@@ -91,9 +83,7 @@ services:
       - key: NODE_VERSION
         value: 20.18.1
       - key: DATABASE_URL
-        fromDatabase:
-          name: muntu-coe-staging-db
-          property: connectionString
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       # Gerado de propósito, mas sem nenhum Cron Job de staging a usá-lo —

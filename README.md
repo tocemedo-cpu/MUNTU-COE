@@ -395,19 +395,18 @@ Alternativa sem Blueprint: criar manualmente um **Web Service** em Render → li
 
 ## Ambiente de teste (staging)
 
-Mesmo `render.yaml`, um segundo Web Service (`muntu-coe-staging`), branch `staging` em vez de `main`, base de dados própria (`muntu-coe-staging-db`, Postgres gerido pelo Render — **nunca** a de produção). Existe para testar alterações de verdade (sobretudo mudanças de permissões/RBAC, que mudam o comportamento imediatamente para contas reais em produção assim que o deploy acontece) antes de irem para `main`.
+Mesmo `render.yaml`, um segundo Web Service (`muntu-coe-staging`), branch `staging` em vez de `main`, base de dados própria — um **segundo projecto Supabase, separado do de produção** (não Postgres gerido pelo Render). Existe para testar alterações de verdade (sobretudo mudanças de permissões/RBAC, que mudam o comportamento imediatamente para contas reais em produção assim que o deploy acontece) antes de irem para `main`.
 
 **Fluxo a partir de agora:** desenvolvimento vai primeiro para a branch `staging` → o Render faz deploy automático dessa branch para `muntu-coe-staging` → testa-se lá (idealmente com as contas de demonstração, `db:seed`) → só depois de confirmado, faz-se `git merge staging` (ou equivalente) para `main`, que despoleta o deploy de produção.
 
-**Para activar (uma vez, no dashboard do Render):**
-1. Sincronizar o Blueprint outra vez (**Blueprints → o seu Blueprint → Sync**, ou criar um novo a partir deste `render.yaml`) — o Render propõe o Web Service `muntu-coe-staging` e a base de dados `muntu-coe-staging-db` novos, a par dos que já existem.
-2. Confirmar a criação dos dois.
-3. Uma vez criado, `DATABASE_URL` do serviço de staging já vem ligada automaticamente à sua própria base de dados (`fromDatabase` no `render.yaml`) — não precisa de colar nada à mão, ao contrário do Web Service de produção.
-4. Opcional: correr `DATABASE_URL="<connection string do staging>" npm run db:seed` para ter as contas de demonstração (ver tabela em §Perfis de demonstração) disponíveis em staging.
+**Para activar (uma vez):**
+1. Criar um projecto Supabase novo, **separado do de produção** — é aqui que ficam os dados de teste.
+2. Copiar a connection string desse projecto (Settings → Database → Connection string, mesmo modo usado em produção) e colar em `DATABASE_URL` do Web Service `muntu-coe-staging` no dashboard do Render — este campo é `sync: false` no `render.yaml`, tal como em `muntu-coe-portal`, ou seja, sempre manual (não há ligação automática entre serviços de contas diferentes).
+3. Sincronizar o Blueprint (**Blueprints → o seu Blueprint → Sync**, ou criar um novo a partir deste `render.yaml`) — o Render propõe o Web Service `muntu-coe-staging` novo, a par do que já existe.
+4. No primeiro deploy, `npm run db:apply-schema` corre `supabase/schema.sql` automaticamente contra o projecto de staging (mesmo passo já usado em produção) — não é preciso colar SQL à mão.
+5. Opcional: correr `DATABASE_URL="<connection string do staging>" npm run db:seed` para ter as contas de demonstração (ver tabela em §Perfis de demonstração) disponíveis em staging.
 
-**Nunca aponte staging para os mesmos `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`NEXT_PUBLIC_SENTRY_DSN` da produção** — ficaria com dados de teste misturados no bucket de Storage ou ruído de testes no Sentry de produção. Deixe essas variáveis por definir em staging (funcionam em modo inerte/fallback, como já documentado acima) ou crie recursos próprios só para testes.
-
-O plano free do Postgres do Render expira ao fim de 30 dias — para um ambiente de teste que se quer manter, recrie a base de dados nessa altura (perde os dados de teste, sem problema) ou mude para um plano pago antes de expirar.
+**Nunca aponte staging para o mesmo `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`NEXT_PUBLIC_SENTRY_DSN` da produção** (o par `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` aqui é só para o Storage de documentos — §Documentos ligados a uma entidade — e é independente da connection string em `DATABASE_URL`) — ficaria com dados de teste misturados no bucket de Storage ou ruído de testes no Sentry de produção. Deixe essas variáveis por definir em staging (funcionam em modo inerte/fallback, como já documentado acima) ou crie recursos próprios só para testes.
 
 ## Base de dados
 
